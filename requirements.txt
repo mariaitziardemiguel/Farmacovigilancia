@@ -1,0 +1,26 @@
+# Web
+fastapi==0.115.6
+uvicorn==0.32.1
+python-multipart==0.0.20
+
+# AWS (Bedrock + S3)
+boto3==1.35.99
+
+# PDF
+pdfplumber==0.11.4
+
+# Datos
+pandas==2.2.3
+openpyxl==3.1.5
+
+# APIs externas (CIMA, PubMed, OpenFDA, Reactome)
+requests==2.32.3
+
+# Traducción (español → inglés para OpenFDA FAERS)
+deep-translator==1.11.4
+
+#documentos PRAC
+pymupdf==1.24.14
+
+# Variables de entorno
+python-dotenv==1.0.1

@@ -1,0 +1,1715 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DrugWatch · Nuevo caso</title>
+  <style>
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --surface2:  #23263a;
+      --border:    #2e3150;
+      --accent:    #7c6af7;
+      --accent-dim:#4a4280;
+      --text:      #e8eaf6;
+      --text-muted:#8b8fa8;
+      --success:   #4caf88;
+      --danger:    #e05c5c;
+      --warn:      #f0a500;
+      --radius:    14px;
+      --font:      'Segoe UI', system-ui, sans-serif;
+    }
+    :root.light {
+      --bg:        #f5f6fa;
+      --surface:   #ffffff;
+      --surface2:  #eef0f7;
+      --border:    #d0d4e8;
+      --accent:    #7c6af7;
+      --accent-dim:#e0dcff;
+      --text:      #1a1d27;
+      --text-muted:#6b6f8a;
+      --success:   #2e8a5e;
+      --danger:    #c0392b;
+      --warn:      #c87000;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100dvh; display: flex; overflow: hidden; }
+
+    /* ── Left sidebar ── */
+    aside {
+      width: 240px; min-width: 240px;
+      background: var(--surface); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; padding: 24px 16px; gap: 18px;
+      overflow-y: auto;
+    }
+    aside h1 { font-size: 1rem; font-weight: 700; color: var(--accent); }
+    aside p  { font-size: 0.8rem; color: var(--text-muted); line-height: 1.6; }
+    aside hr { border: none; border-top: 1px solid var(--border); }
+    aside .step { display: flex; gap: 10px; align-items: flex-start; font-size: 0.8rem; color: var(--text-muted); }
+    aside .step .num {
+      background: var(--accent-dim); color: var(--accent);
+      border-radius: 50%; width: 20px; height: 20px; min-width: 20px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.7rem; font-weight: 700;
+    }
+    aside footer { margin-top: auto; font-size: 0.72rem; color: var(--text-muted); }
+    #theme-btn {
+      background: none; border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text-muted); cursor: pointer; font-size: 0.8rem;
+      padding: 6px 10px; display: flex; align-items: center; gap: 6px;
+      transition: color 0.2s, border-color 0.2s; width: 100%; margin-bottom: 8px;
+    }
+    #theme-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+    /* ── Source badges ── */
+    .src-badge {
+      font-size: 0.7rem; padding: 2px 8px; border-radius: 20px; font-weight: 600;
+      border: 1px solid;
+    }
+    .src-fda      { color: #60a5fa; border-color: #60a5fa; background: #0d2040; }
+    .src-pubmed   { color: #34d399; border-color: #34d399; background: #062420; }
+    .src-reactome { color: #f472b6; border-color: #f472b6; background: #2a0820; }
+    .src-prac     { color: #fbbf24; border-color: #fbbf24; background: #231500; }
+    .src-cima     { color: #a78bfa; border-color: #a78bfa; background: #1a0d40; }
+    .src-drugbank { color: #6366f1; border-color: #6366f1; background: #1a1a3f; }
+    .src-pharmgkb { color: #ec4899; border-color: #ec4899; background: #2a0f2a; }
+    .src-paciente { color: #94a3b8; border-color: #94a3b8; background: #1a1d27; }
+    :root.light .src-fda      { background: #dbeafe; }
+    :root.light .src-pubmed   { background: #d1fae5; }
+    :root.light .src-reactome { background: #fce7f3; }
+    :root.light .src-prac     { background: #fef3c7; }
+    :root.light .src-cima     { background: #ede9fe; }
+    :root.light .src-drugbank { background: #e0e7ff; }
+    :root.light .src-pharmgkb { background: #fbf1f8; }
+    :root.light .src-paciente { background: #f1f5f9; }
+
+    /* ── Main content ── */
+    main { flex: 1; overflow-y: auto; padding: 36px 40px; display: flex; flex-direction: column; gap: 28px; }
+    h2 { font-size: 1.3rem; color: var(--text); }
+    h2 span { color: var(--accent); }
+
+    .section {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 24px;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .section-title {
+      font-size: 0.85rem; font-weight: 600; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    label { font-size: 0.88rem; color: var(--text); }
+    label span { color: var(--text-muted); font-size: 0.78rem; margin-left: 4px; }
+
+    textarea {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); font-family: var(--font);
+      font-size: 0.88rem; padding: 10px 14px; outline: none;
+      transition: border-color 0.2s; width: 100%; resize: vertical; line-height: 1.6;
+    }
+    textarea:focus { border-color: var(--accent); }
+    input[type="text"], input[type="number"], select {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); font-family: var(--font);
+      font-size: 0.92rem; padding: 10px 14px; outline: none;
+      transition: border-color 0.2s; width: 100%;
+    }
+    input:focus, select:focus { border-color: var(--accent); }
+    select option { background: var(--surface2); }
+
+    /* ── MedDRA autocomplete ── */
+    .meddra-wrap { position: relative; }
+    .meddra-dropdown {
+      display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+      background: var(--surface2); border: 1px solid var(--accent);
+      border-radius: 8px; z-index: 200; max-height: 240px; overflow-y: auto;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    .meddra-dropdown.open { display: block; }
+    .meddra-option {
+      padding: 8px 14px; cursor: pointer; font-size: 0.85rem;
+      border-bottom: 1px solid var(--border); line-height: 1.4;
+      transition: background 0.15s;
+    }
+    .meddra-option:last-child { border-bottom: none; }
+    .meddra-option:hover, .meddra-option.active { background: var(--accent-dim); }
+    .meddra-option .opt-code  { font-weight: 700; color: var(--accent); margin-right: 6px; font-size: 0.78rem; }
+    .meddra-option .opt-type  { font-size: 0.7rem; color: var(--text-muted); margin-left: 4px; }
+    .meddra-option .opt-pt    { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+    .meddra-no-results { padding: 10px 14px; font-size: 0.82rem; color: var(--text-muted); font-style: italic; }
+
+    /* ── MedDRA preview panel ── */
+    #meddra-preview {
+      display: none; margin-top: 10px;
+      background: var(--surface2); border: 1px solid var(--accent-dim);
+      border-radius: 8px; padding: 12px 16px; font-size: 0.82rem; line-height: 1.8;
+    }
+    #meddra-preview .prev-code  { font-weight: 700; color: var(--accent); }
+    #meddra-preview .prev-type  {
+      display: inline-block; font-size: 0.7rem; font-weight: 700; padding: 1px 7px;
+      border-radius: 10px; margin-left: 6px; vertical-align: middle;
+    }
+    .prev-type.pt  { background: #1a3a2a; color: #4caf88; border: 1px solid #4caf88; }
+    .prev-type.llt { background: #1a2a3a; color: #60a5fa; border: 1px solid #60a5fa; }
+    #meddra-preview .prev-row   { color: var(--text-muted); }
+    #meddra-preview .prev-row b { color: var(--text); }
+    #meddra-preview .prev-hier  {
+      margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+      font-size: 0.78rem; color: var(--text-muted);
+    }
+    #meddra-preview .prev-llts  {
+      margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+    }
+    #meddra-preview .llt-tag {
+      display: inline-block; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 1px 8px; margin: 2px 2px; font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    #meddra-preview .clear-btn {
+      float: right; background: none; border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text-muted); cursor: pointer; font-size: 0.72rem; padding: 1px 7px;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    #meddra-preview .clear-btn:hover { color: var(--danger); border-color: var(--danger); }
+
+    /* ── Fármaco autocomplete (reutiliza estilos meddra) ── */
+    #farmaco-preview {
+      display: none; margin-top: 10px;
+      background: var(--surface2); border: 1px solid var(--accent-dim);
+      border-radius: 8px; padding: 10px 16px; font-size: 0.82rem; line-height: 1.8;
+    }
+    #farmaco-preview .clear-btn {
+      float: right; background: none; border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text-muted); cursor: pointer; font-size: 0.72rem; padding: 1px 7px;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    #farmaco-preview .clear-btn:hover { color: var(--danger); border-color: var(--danger); }
+    #farmaco-preview .inn-badge {
+      display: inline-block; background: #1a2a3a; color: #60a5fa;
+      border: 1px solid #60a5fa; border-radius: 10px;
+      font-size: 0.75rem; font-weight: 700; padding: 1px 8px; margin-left: 6px;
+    }
+    #farmaco-preview .warn-badge {
+      display: inline-block; background: #231500; color: var(--warn);
+      border: 1px solid var(--warn); border-radius: 10px;
+      font-size: 0.75rem; font-weight: 700; padding: 1px 8px; margin-left: 6px;
+    }
+
+    #generate-btn {
+      background: var(--accent); border: none; border-radius: 10px;
+      color: white; cursor: pointer; font-family: var(--font);
+      font-size: 1rem; font-weight: 600; padding: 14px 32px;
+      align-self: flex-start; transition: background 0.2s, opacity 0.2s;
+    }
+    #generate-btn:hover    { background: #9d8ef9; }
+    #generate-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Progress log ── */
+    #log {
+      display: none; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 16px;
+      font-size: 0.82rem; color: var(--text-muted);
+      font-family: monospace; line-height: 1.8; max-height: 160px; overflow-y: auto;
+    }
+
+    /* ── Report header ── */
+    #informe-header {
+      display: none; background: var(--surface);
+      border: 1px solid var(--accent-dim); border-radius: var(--radius);
+      padding: 20px 24px;
+    }
+    #informe-header h3 { font-size: 1.1rem; color: var(--accent); margin-bottom: 10px; }
+    #informe-header .meta { font-size: 0.88rem; color: var(--text-muted); line-height: 1.8; }
+    #informe-header .meta b { color: var(--text); }
+
+    /* ── Confidence badge ── */
+    .conf-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 0.72rem; padding: 2px 8px; border-radius: 20px; font-weight: 600;
+      border: 1px solid; margin-left: 8px;
+    }
+    .conf-alta   { color: var(--success); border-color: var(--success); }
+    .conf-media  { color: var(--warn);    border-color: var(--warn); }
+    .conf-baja   { color: var(--danger);  border-color: var(--danger); }
+    .conf-nd     { color: var(--text-muted); border-color: var(--border); }
+
+    /* ── Cards grid ── */
+    #cards-grid {
+      display: none;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 16px;
+    }
+    
+    /* Section divider */
+    .section-divider {
+      grid-column: 1 / -1;
+      font-size: 1rem; font-weight: 700; color: var(--accent);
+      padding: 20px 0 8px 0; margin-top: 8px;
+      border-top: 2px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .section-divider:first-of-type { margin-top: 0; border-top: none; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px;
+      display: flex; flex-direction: column; gap: 12px;
+      transition: border-color 0.3s, background 0.3s;
+    }
+    .card.loading { border-color: var(--accent-dim); }
+    .card.done    { border-color: var(--success); }
+    .card.error   { border-color: var(--danger); }
+    
+    /* Analytical vs Raw Data card styles */
+    .card.analytical { border-left: 4px solid var(--accent); }
+    .card.analytical.loading { border-left-color: var(--accent); }
+    .card.analytical.done { border-left-color: var(--success); }
+    
+    .card.raw-data { border-left: 4px solid #6b7280; }
+    .card.raw-data .sources { display: none; }
+
+    #card-cima_raw     { border-left-color: #a78bfa; background: color-mix(in srgb, var(--surface) 96%, #a78bfa 4%); }
+    #card-fda_raw      { border-left-color: #60a5fa; background: color-mix(in srgb, var(--surface) 96%, #60a5fa 4%); }
+    #card-drugbank_raw { border-left-color: #6366f1; background: color-mix(in srgb, var(--surface) 96%, #6366f1 4%); }
+    #card-pharmgkb_raw { border-left-color: #ec4899; background: color-mix(in srgb, var(--surface) 96%, #ec4899 4%); }
+    #card-pubmed_raw   { border-left-color: #34d399; background: color-mix(in srgb, var(--surface) 96%, #34d399 4%); }
+    #card-prac_raw     { border-left-color: #fbbf24; background: color-mix(in srgb, var(--surface) 96%, #fbbf24 4%); }
+    #card-reactome_raw { border-left-color: #22d3ee; background: color-mix(in srgb, var(--surface) 96%, #22d3ee 4%); }
+
+    .card.raw-data .card-loading-text { font-style: italic; color: #8b7496; }
+
+    .card-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .card-title  { font-size: 0.9rem; font-weight: 700; color: var(--text); flex: 1; }
+
+    .card-spinner {
+      width: 16px; height: 16px;
+      border: 2px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0;
+    }
+    .card-check  { color: var(--success); font-size: 1rem; flex-shrink: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Refine button on cards */
+    .refine-btn {
+      background: none; border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text-muted); cursor: pointer; font-size: 0.72rem;
+      padding: 3px 8px; transition: color 0.2s, border-color 0.2s;
+      white-space: nowrap; flex-shrink: 0; display: none;
+    }
+    .refine-btn:hover { color: var(--accent); border-color: var(--accent); }
+    .card.done .refine-btn, .card.error .refine-btn { display: inline-flex; }
+    
+    /* Hide refine button for raw data cards */
+    #card-cima_raw .refine-btn, #card-fda_raw .refine-btn, 
+    #card-drugbank_raw .refine-btn, #card-pharmgkb_raw .refine-btn,
+    #card-pubmed_raw .refine-btn, #card-prac_raw .refine-btn { display: none !important; }
+
+    /* Card metadata row */
+    .card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .card-date { font-size: 0.7rem; color: var(--text-muted); }
+
+    .sources { display: flex; flex-wrap: wrap; gap: 6px; }
+    .contradiccion {
+      font-size: 0.78rem; color: var(--warn);
+      background: #231700; border: 1px solid var(--warn);
+      border-radius: 8px; padding: 8px 12px; line-height: 1.5;
+    }
+    :root.light .contradiccion { background: #fff8e1; }
+    .contradiccion::before { content: "⚠ Contradicción: "; font-weight: 700; }
+
+    .card-body { font-size: 0.82rem; color: var(--text-muted); line-height: 1.6; }
+    .card-body b { color: var(--text); }
+    .card-body ul { padding-left: 16px; margin-top: 4px; }
+    .card-loading-text { color: var(--text-muted); font-size: 0.82rem; font-style: italic; }
+
+    .ref-group { margin-bottom: 12px; }
+    .ref-group-title { font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.05em; margin-bottom: 6px; }
+    .ref-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+    .ref-list li { font-size: 0.78rem; }
+    .ref-list a { color: var(--accent); text-decoration: none; word-break: break-all; }
+    .ref-list a:hover { text-decoration: underline; }
+    .ref-list .ref-name { color: var(--text-muted); }
+
+    .bio-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; margin-top: 4px; }
+    .bio-table th { color: var(--text-muted); font-weight: 600; text-align: left; padding: 4px 0; border-bottom: 1px solid var(--border); }
+    .bio-table td { padding: 6px 0; border-bottom: 1px solid var(--surface2); vertical-align: top; color: var(--text); }
+
+    /* ── Right chat panel ── */
+    #chat-panel {
+      width: 0; min-width: 0; overflow: hidden;
+      background: var(--surface); border-left: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      transition: width 0.3s ease, min-width 0.3s ease;
+    }
+    #chat-panel.open { width: 340px; min-width: 340px; }
+
+    #chat-inner { width: 340px; display: flex; flex-direction: column; height: 100%; }
+
+    #chat-header {
+      padding: 16px 16px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      flex-shrink: 0;
+    }
+    #chat-header h3 { font-size: 0.9rem; font-weight: 700; color: var(--text); }
+    #chat-header p  { font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; }
+    #chat-close {
+      background: none; border: none; color: var(--text-muted); cursor: pointer;
+      font-size: 1.1rem; padding: 4px; border-radius: 6px;
+      transition: color 0.2s; line-height: 1;
+    }
+    #chat-close:hover { color: var(--text); }
+
+    /* Quick section buttons */
+    #chat-sections {
+      padding: 10px 12px; border-bottom: 1px solid var(--border);
+      display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0;
+    }
+    .section-pill {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 20px; color: var(--text-muted); cursor: pointer;
+      font-size: 0.7rem; padding: 3px 10px;
+      transition: color 0.2s, border-color 0.2s, background 0.2s;
+      white-space: nowrap;
+    }
+    .section-pill:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+    .section-pill.active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+
+    /* Chat messages */
+    #chat-messages {
+      flex: 1; overflow-y: auto; padding: 16px 12px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    #chat-messages::-webkit-scrollbar { width: 4px; }
+    #chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .cmsg { display: flex; flex-direction: column; gap: 4px; }
+    .cmsg.user { align-items: flex-end; }
+    .cmsg.ai   { align-items: flex-start; }
+
+    .cbubble {
+      max-width: 90%; padding: 10px 14px; border-radius: 12px;
+      font-size: 0.84rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+    }
+    .cmsg.user .cbubble { background: var(--accent-dim); border: 1px solid var(--border); border-top-right-radius: 4px; color: var(--text); }
+    .cmsg.ai   .cbubble { background: var(--surface2); border: 1px solid var(--border); border-top-left-radius: 4px; color: var(--text); }
+
+    .cmsg-label { font-size: 0.68rem; color: var(--text-muted); }
+
+    /* Typing dots */
+    .typing-dots span {
+      display: inline-block; width: 6px; height: 6px;
+      background: var(--text-muted); border-radius: 50%; margin: 0 2px;
+      animation: bounce 1.2s infinite;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
+      40%           { transform: translateY(-5px); opacity: 1; }
+    }
+
+    /* Chat welcome */
+    #chat-welcome {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      flex: 1; gap: 8px; color: var(--text-muted); font-size: 0.82rem; text-align: center;
+      padding: 24px;
+    }
+    #chat-welcome .wi { font-size: 2rem; }
+
+    /* Chat input */
+    #chat-input-area {
+      padding: 12px; border-top: 1px solid var(--border); flex-shrink: 0;
+    }
+    #chat-input-row {
+      display: flex; align-items: flex-end; gap: 8px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 8px 10px;
+      transition: border-color 0.2s;
+    }
+    #chat-input-row:focus-within { border-color: var(--accent); }
+    #chat-textarea {
+      flex: 1; background: none; border: none; outline: none;
+      color: var(--text); font-family: var(--font);
+      font-size: 0.84rem; resize: none; line-height: 1.5; max-height: 120px; overflow-y: auto;
+    }
+    #chat-textarea::placeholder { color: var(--text-muted); }
+    #chat-send {
+      background: var(--accent); border: none; border-radius: 7px;
+      color: white; cursor: pointer; padding: 5px 7px;
+      display: flex; align-items: center; transition: background 0.2s, opacity 0.2s;
+      flex-shrink: 0;
+    }
+    #chat-send:hover { background: #9d8ef9; }
+    #chat-send:disabled { opacity: 0.4; cursor: not-allowed; }
+    #chat-send svg { width: 16px; height: 16px; }
+
+    /* ── Open chat toggle (fab) ── */
+    #chat-fab {
+      display: none; position: fixed; bottom: 28px; right: 28px;
+      background: var(--accent); border: none; border-radius: 50%;
+      width: 48px; height: 48px; color: white; cursor: pointer;
+      font-size: 1.2rem; box-shadow: 0 4px 16px rgba(124,106,247,0.4);
+      align-items: center; justify-content: center;
+      transition: background 0.2s, transform 0.2s;
+      z-index: 100;
+    }
+    #chat-fab:hover { background: #9d8ef9; transform: scale(1.08); }
+    #chat-fab.visible { display: flex; }
+  </style>
+</head>
+<body>
+
+<!-- Left sidebar -->
+<aside>
+  <h1>💊 DrugWatch</h1>
+  <hr/>
+  <p>Introduce los datos del caso para generar el análisis de farmacovigilancia.</p>
+  <hr/>
+  <div class="step"><div class="num">1</div><span>Fármaco y código MedDRA</span></div>
+  <div class="step"><div class="num">2</div><span>Datos demográficos del paciente</span></div>
+  <div class="step"><div class="num">3</div><span>Pulsa «Generar análisis»</span></div>
+  <div class="step"><div class="num">4</div><span>Refina cada sección con el asistente lateral</span></div>
+</aside>
+
+<!-- Main content -->
+<main id="main-content">
+  <h2> Nuevo caso <span>· Análisis RAM</span></h2>
+
+  <!-- Mandatory fields -->
+  <div class="section">
+    <div class="section-title">Datos del caso <span style="color:var(--danger);font-size:0.75rem">* </span></div>
+    <div class="field">
+      <label>Fármaco <span style="color:var(--danger)">*</span>
+        <span>(nombre en castellano)</span>
+      </label>
+      <div class="meddra-wrap" id="farmaco-wrap">
+        <input type="text" id="farmaco-input"
+               placeholder="Ej: ibuprofeno, alprazolam…"
+               autocomplete="off"
+               oninput="farmacoOnInput(this.value)"
+               onkeydown="farmacoKeydown(event)"
+               onfocus="if(this.value.length>=2) farmacoOnInput(this.value)"
+        />
+        <input type="hidden" id="farmaco"/>
+        <div class="meddra-dropdown" id="farmaco-dropdown"></div>
+      </div>
+      <div id="farmaco-preview"></div>
+    </div>
+    <div class="field">
+      <label>Código MedDRA de la RAM <span style="color:var(--danger)">*</span>
+        <span>(escribe código o nombre)</span>
+      </label>
+      <div class="meddra-wrap" id="meddra-wrap">
+        <input type="text" id="cod-dedra-input"
+               placeholder="Ej: 10044390 o «ischaemic attack»"
+               autocomplete="off"
+               oninput="meddraOnInput(this.value)"
+               onkeydown="meddraKeydown(event)"
+               onfocus="if(this.value.length>=2) meddraOnInput(this.value)"
+        />
+        <input type="hidden" id="cod-dedra"/>
+        <div class="meddra-dropdown" id="meddra-dropdown"></div>
+      </div>
+      <div id="meddra-preview"></div>
+    </div>
+  </div>
+
+  <!-- Demographics -->
+  <div class="section">
+    <div class="section-title">Datos demográficos <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)">(opcional)</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+      <div class="field">
+        <label>Edad <span>(años)</span></label>
+        <input type="number" id="edad" placeholder="Ej: 67" min="0" max="120"/>
+      </div>
+      <div class="field">
+        <label>Sexo</label>
+        <select id="sexo">
+          <option value="">— No especificado —</option>
+          <option value="Masculino">Masculino</option>
+          <option value="Femenino">Femenino</option>
+          <option value="Otro">Otro</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Etnia / Nacionalidad</label>
+        <input type="text" id="etnia" placeholder="Ej: Española"/>
+      </div>
+    </div>
+  </div>
+
+  <!-- Button -->
+  <div style="display:flex;align-items:center;gap:16px;">
+    <button id="generate-btn" onclick="generate()" disabled>Generar análisis</button>
+  </div>
+
+  <!-- Progress log -->
+  <div id="log"></div>
+
+  <!-- Report header -->
+  <div id="informe-header">
+    <h3>ANÁLISIS TÉCNICO DE FARMACOVIGILANCIA</h3>
+    <div class="meta" id="informe-meta"></div>
+  </div>
+
+  <!-- Cards grid -->
+  <div id="cards-grid"></div>
+</main>
+
+<!-- Right chat panel -->
+<div id="chat-panel">
+  <div id="chat-inner">
+    <div id="chat-header">
+      <div>
+        <h3> Asistente IA</h3>
+        <p>Consulta o refina cualquier sección del análisis</p>
+      </div>
+      <button id="chat-close" onclick="toggleChat()" title="Cerrar">✕</button>
+    </div>
+
+    <!-- Section quick-buttons -->
+    <div id="chat-sections">
+      <span style="font-size:0.7rem;color:var(--text-muted);align-self:center;margin-right:2px;">Sección:</span>
+      <button class="section-pill" onclick="askSection('mecanistica')">Mecanística</button>
+      <button class="section-pill" onclick="askSection('clinica')">Clínica</button>
+      <button class="section-pill" onclick="askSection('regulatoria')">Regulatoria</button>
+      <hr style="width:100%;border:none;border-top:1px solid var(--border);margin:6px 0;opacity:0.3;"/>
+      <span style="font-size:0.7rem;color:var(--text-muted);align-self:center;margin-right:2px;">Fuentes:</span>
+    </div>
+
+    <!-- Messages -->
+    <div id="chat-messages">
+      <div id="chat-welcome">
+        <div class="wi">💊</div>
+        <p>Haz una pregunta sobre el análisis o pulsa una sección para empezar.</p>
+      </div>
+    </div>
+
+    <!-- Input -->
+    <div id="chat-input-area">
+      <div id="chat-input-row">
+        <textarea id="chat-textarea" rows="1" placeholder="Pregunta sobre el análisis..." onkeydown="chatKey(event)" oninput="chatResize(this)"></textarea>
+        <button id="chat-send" onclick="chatSend()" title="Enviar">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Floating button to reopen chat after generation -->
+<button id="chat-fab" onclick="toggleChat()" title="Abrir asistente">💬</button>
+
+<script>
+  /* ─────────────────────────────────────────────
+     State
+  ───────────────────────────────────────────── */
+  const SECCIONES_ANALYTICAL = [
+    { id: 'mecanistica',  titulo: '1. Dimension Mecanistica' },
+    { id: 'clinica',      titulo: '2. Dimension Clinica' },
+    { id: 'regulatoria',  titulo: '3. Dimension Regulatoria' },
+  ];
+  
+  const SECCIONES_RAW = [
+    { id: 'cima_raw',       titulo: 'CIMA - AEMPS' },
+    { id: 'fda_raw',        titulo: 'FDA FAERS' },
+    { id: 'drugbank_raw',   titulo: 'DrugBank' },
+    { id: 'pharmgkb_raw',   titulo: 'PharmGKB' },
+    { id: 'pubmed_raw',     titulo: 'PubMed' },
+    { id: 'prac_raw',       titulo: 'PRAC/EMA - Actas de Señales' },
+    { id: 'reactome_raw',   titulo: 'Reactome - Pathways Biológicos' },
+  ];
+  
+  // Array completo para compatibilidad
+  const SECCIONES = [...SECCIONES_ANALYTICAL, ...SECCIONES_RAW];
+
+  const SRC_CLASS = {
+    'FDA FAERS':    'src-fda',
+    'FDA':          'src-fda',
+    'PubMed':       'src-pubmed',
+    'Reactome':     'src-reactome',
+    'PRAC/EMA':     'src-prac',
+    'PRAC':         'src-prac',
+    'CIMA':         'src-cima',
+    'DrugBank':     'src-drugbank',
+    'PharmGKB':     'src-pharmgkb',
+    'Datos paciente':'src-paciente'
+  };
+
+  let reportData = {
+    farmaco: '', ram: '', cod_dedra: '', desc_dedra: '',
+    secciones: {}, generatedAt: null
+  };
+
+  let chatHistory    = [];
+  let chatReady      = false;
+  let chatSessionId  = null;
+  let activePill     = null;
+  let meddraResolved  = null;
+  let meddraTimer     = null;
+  let meddraFocusIdx  = -1;
+  let farmacoResolved = null;
+  let farmacoTimer    = null;
+  let farmacoFocusIdx = -1;
+
+  /* ─────────────────────────────────────────────
+     MedDRA autocomplete
+  ───────────────────────────────────────────── */
+  function meddraOnInput(val) {
+    clearTimeout(meddraTimer);
+    if (document.getElementById('cod-dedra').value) {
+      document.getElementById('cod-dedra').value = '';
+      meddraResolved = null;
+      document.getElementById('meddra-preview').style.display = 'none';
+      checkReady();
+    }
+    // Si el usuario borra el campo, limpiar selección
+    if (val.trim().length < 2) {
+      meddraCloseDropdown();
+      return;
+    }
+    meddraTimer = setTimeout(() => meddraFetch(val.trim()), 300);
+  }
+
+  async function meddraFetch(q) {
+    const dd = document.getElementById('meddra-dropdown');
+    dd.innerHTML = '<div class="meddra-no-results">Buscando...</div>';
+    dd.classList.add('open');
+    meddraFocusIdx = -1;
+    try {
+      const res = await fetch(`/meddra/search?q=${encodeURIComponent(q)}&limit=15`);
+      const items = await res.json();
+      if (!items.length) {
+        dd.innerHTML = '<div class="meddra-no-results">Sin resultados para "' + q + '"</div>';
+        return;
+      }
+      dd.innerHTML = items.map((it, i) => {
+        const typeCls = it.type === 'PT' ? 'pt' : 'llt';
+        const ptLine  = it.type === 'LLT' && it.pt_name_en
+          ? `<div class="opt-pt">→ PT: ${it.pt_name_en}</div>` : '';
+        const displayName = it.name_es || it.name_en;
+        const enHint = it.name_es && it.name_en
+          ? `<span class="opt-type">${it.name_en}</span>` : '';
+        return `<div class="meddra-option" data-idx="${i}" data-code="${it.code}"
+                     data-name="${it.name_en.replace(/"/g,'&quot;')}"
+                     onclick="meddraSelect('${it.code}','${it.name_en.replace(/'/g,"\\'")}')">
+          <span class="opt-code">${it.code}</span>
+          ${displayName}
+          <span class="opt-type">[${it.type}]</span>
+          ${enHint}
+          ${ptLine}
+        </div>`;
+      }).join('');
+    } catch(e) {
+      dd.innerHTML = '<div class="meddra-no-results">Error al buscar</div>';
+    }
+  }
+
+  function meddraCloseDropdown() {
+    const dd = document.getElementById('meddra-dropdown');
+    dd.classList.remove('open');
+    meddraFocusIdx = -1;
+  }
+
+  function meddraKeydown(e) {
+    const dd = document.getElementById('meddra-dropdown');
+    const opts = dd.querySelectorAll('.meddra-option');
+    if (!dd.classList.contains('open') || !opts.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      meddraFocusIdx = Math.min(meddraFocusIdx + 1, opts.length - 1);
+      opts.forEach((o, i) => o.classList.toggle('active', i === meddraFocusIdx));
+      opts[meddraFocusIdx]?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      meddraFocusIdx = Math.max(meddraFocusIdx - 1, 0);
+      opts.forEach((o, i) => o.classList.toggle('active', i === meddraFocusIdx));
+      opts[meddraFocusIdx]?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter' && meddraFocusIdx >= 0) {
+      e.preventDefault();
+      const opt = opts[meddraFocusIdx];
+      meddraSelect(opt.dataset.code, opt.dataset.name);
+    } else if (e.key === 'Escape') {
+      meddraCloseDropdown();
+    }
+  }
+
+  async function meddraSelect(code, nameEn) {
+    document.getElementById('cod-dedra-input').value = `${code} — ${nameEn}`;
+    document.getElementById('cod-dedra').value = code;
+    meddraCloseDropdown();
+    checkReady();
+    // Resolver info completa
+    const preview = document.getElementById('meddra-preview');
+    preview.innerHTML = '<span style="color:var(--text-muted);font-size:0.8rem;">Cargando info MedDRA...</span>';
+    preview.style.display = 'block';
+    try {
+      const res  = await fetch(`/meddra/resolve?code=${encodeURIComponent(code)}`);
+      const data = await res.json();
+      meddraResolved = data;
+      renderMeddraPreview(data);
+    } catch(e) {
+      preview.innerHTML = '<span style="color:var(--text-muted);">No se pudo resolver el código</span>';
+    }
+  }
+
+  function renderMeddraPreview(d) {
+    const preview = document.getElementById('meddra-preview');
+    if (!d || d.error) {
+      preview.innerHTML = `<span style="color:var(--danger);">${d?.error || 'Error'}</span>`;
+      preview.style.display = 'block';
+      return;
+    }
+    const typeCls  = d.type === 'PT' ? 'pt' : 'llt';
+    const typeLabel = d.type;
+
+    let html = `<button class="clear-btn" onclick="meddraClear()" title="Limpiar selección">✕ Limpiar</button>`;
+    html += `<div><span class="prev-code">${d.code}</span><span class="prev-type ${typeCls}">${typeLabel}</span></div>`;
+    html += `<div class="prev-row">→ EN: <b>${d.name_en || '—'}</b></div>`;
+    html += `<div class="prev-row">→ ES: <b>${d.name_es || '—'}</b></div>`;
+
+    if (d.type === 'LLT' && d.pt_code) {
+      html += `<div class="prev-row" style="margin-top:4px;">→ PT padre: <b>${d.pt_code}</b> — ${d.pt_name_en || ''}</div>`;
+      if (d.pt_name_es) html += `<div class="prev-row" style="margin-left:20px;">ES: <b>${d.pt_name_es}</b></div>`;
+    }
+
+    const llts = d.llts_en || [];
+    if (llts.length) {
+      html += `<div class="prev-llts">`;
+      html += `<div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;">LLTs (${llts.length}):</div>`;
+      html += llts.map(l => `<span class="llt-tag">${l}</span>`).join('');
+      html += `</div>`;
+    }
+
+    preview.innerHTML = html;
+    preview.style.display = 'block';
+  }
+
+  function meddraClear() {
+    document.getElementById('cod-dedra-input').value = '';
+    document.getElementById('cod-dedra').value = '';
+    document.getElementById('meddra-preview').style.display = 'none';
+    meddraResolved = null;
+    meddraCloseDropdown();
+    checkReady();
+    document.getElementById('cod-dedra-input').focus();
+  }
+
+  // Cerrar dropdowns al hacer click fuera
+  document.addEventListener('click', e => {
+    if (!document.getElementById('meddra-wrap')?.contains(e.target))   meddraCloseDropdown();
+    if (!document.getElementById('farmaco-wrap')?.contains(e.target))  farmacoCloseDropdown();
+  });
+
+  /* ─────────────────────────────────────────────
+     Fármaco autocomplete (RxNorm)
+  ───────────────────────────────────────────── */
+  function farmacoOnInput(val) {
+    clearTimeout(farmacoTimer);
+    if (document.getElementById('farmaco').value) {
+      document.getElementById('farmaco').value = '';
+      farmacoResolved = null;
+      document.getElementById('farmaco-preview').style.display = 'none';
+      checkReady();
+    }
+    if (val.trim().length < 2) {
+      farmacoCloseDropdown();
+      return;
+    }
+    farmacoTimer = setTimeout(() => farmacoFetch(val.trim()), 350);
+  }
+
+  async function farmacoFetch(q) {
+    const dd = document.getElementById('farmaco-dropdown');
+    dd.innerHTML = '<div class="meddra-no-results">Buscando en RxNorm…</div>';
+    dd.classList.add('open');
+    farmacoFocusIdx = -1;
+    try {
+      const res   = await fetch(`/farmaco/search?q=${encodeURIComponent(q)}`);
+      const items = await res.json();
+      if (!items.length) {
+        dd.innerHTML = `<div class="meddra-no-results">Sin resultados para "${q}" — verifica el nombre</div>`;
+        return;
+      }
+      dd.innerHTML = items.map((it, i) => {
+        const nameEs = (it.name_es || it.name || '').replace(/"/g, '&quot;');
+        const nameEn = (it.name_en || it.inn || '').replace(/"/g, '&quot;');
+        const inn = (it.inn || '').replace(/"/g, '&quot;');
+        const rxcui = (it.rxcui || '').toString().replace(/"/g, '&quot;');
+        return `<div class="meddra-option" data-idx="${i}" data-name-es="${nameEs}" data-name-en="${nameEn}" data-inn="${inn}" data-rxcui="${rxcui}"
+              onclick="farmacoSelectFromOption(this)">
+          ${it.name_es || it.name || q} &#8594; ${it.name_en || it.inn || 'N/D'}
+          <span style="font-size:0.72rem;color:var(--text-muted);margin-left:6px;">| INN: <b style="color:#60a5fa;">${it.inn || 'N/D'}</b></span>
+        </div>`;
+      }).join('');
+    } catch(e) {
+      dd.innerHTML = '<div class="meddra-no-results">Error al conectar con RxNorm</div>';
+    }
+  }
+
+  function farmacoCloseDropdown() {
+    document.getElementById('farmaco-dropdown').classList.remove('open');
+    farmacoFocusIdx = -1;
+  }
+
+  function farmacoKeydown(e) {
+    const dd   = document.getElementById('farmaco-dropdown');
+    const opts = dd.querySelectorAll('.meddra-option');
+    if (!dd.classList.contains('open') || !opts.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      farmacoFocusIdx = Math.min(farmacoFocusIdx + 1, opts.length - 1);
+      opts.forEach((o, i) => o.classList.toggle('active', i === farmacoFocusIdx));
+      opts[farmacoFocusIdx]?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      farmacoFocusIdx = Math.max(farmacoFocusIdx - 1, 0);
+      opts.forEach((o, i) => o.classList.toggle('active', i === farmacoFocusIdx));
+      opts[farmacoFocusIdx]?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter' && farmacoFocusIdx >= 0) {
+      e.preventDefault();
+      const opt = opts[farmacoFocusIdx];
+      farmacoSelectFromOption(opt);
+    } else if (e.key === 'Escape') {
+      farmacoCloseDropdown();
+    }
+  }
+
+  function farmacoSelectFromOption(el) {
+    farmacoSelect(el.dataset.nameEs || '', el.dataset.nameEn || '', el.dataset.inn || '', el.dataset.rxcui || '');
+  }
+
+  function farmacoSelect(nameEs, nameEn, inn, rxcui) {
+    const shown = (nameEs || nameEn || inn || '').trim();
+    const innFinal = (inn || nameEn || shown).trim();
+    document.getElementById('farmaco-input').value = shown;
+    document.getElementById('farmaco').value = innFinal;
+    farmacoCloseDropdown();
+    farmacoResolved = { inn: innFinal, name: shown, name_en: nameEn || innFinal, rxcui: rxcui || null };
+    checkReady();
+    renderFarmacoPreview(shown, farmacoResolved);
+  }
+
+  function renderFarmacoPreview(inputName, data) {
+    const preview = document.getElementById('farmaco-preview');
+    let html = `<button class="clear-btn" onclick="farmacoClear()" title="Limpiar">✕ Limpiar</button>`;
+    if (data.error || !data.inn) {
+      html += `<span style="color:var(--warn);">⚠ No encontrado en RxNorm — verifica el nombre</span>`;
+    } else {
+      html += `<span style="color:var(--text);">${inputName} &#8594; ${data.name_en || data.inn}</span>`;
+      html += `<span class="inn-badge">INN: ${data.inn}</span>`;
+      if (data.rxcui) {
+        html += `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px;">RxCUI: ${data.rxcui}</div>`;
+      }
+    }
+    preview.innerHTML = html;
+    preview.style.display = 'block';
+  }
+
+  function farmacoClear() {
+    document.getElementById('farmaco-input').value = '';
+    document.getElementById('farmaco').value = '';
+    document.getElementById('farmaco-preview').style.display = 'none';
+    farmacoResolved = null;
+    farmacoCloseDropdown();
+    checkReady();
+    document.getElementById('farmaco-input').focus();
+  }
+
+  /* ─────────────────────────────────────────────
+     Form logic
+  ───────────────────────────────────────────── */
+  function checkReady() {
+    const ok = document.getElementById('farmaco').value.trim() !== ''
+            && document.getElementById('cod-dedra').value.trim() !== '';
+    document.getElementById('generate-btn').disabled = !ok;
+  }
+
+  function log(msg) {
+    // progress log hidden intentionally
+  }
+
+  function crearTarjetas() {
+    const grid = document.getElementById('cards-grid');
+    grid.innerHTML = '';
+    grid.style.display = 'grid';
+
+    // Sección de información recogida (fuentes externas)
+    grid.innerHTML += `<div class="section-divider"> Información Recogida</div>`;
+
+    SECCIONES_RAW.forEach(s => {
+      grid.innerHTML += `
+        <div class="card loading raw-data" id="card-${s.id}">
+          <div class="card-header">
+            <span class="card-title">${s.titulo}</span>
+            <div class="card-spinner" id="spin-${s.id}"></div>
+          </div>
+          <div class="card-meta" id="meta-${s.id}"></div>
+          <div class="sources" id="src-${s.id}"></div>
+          <div class="card-body" id="body-${s.id}">
+            <span class="card-loading-text">Recopilando datos...</span>
+          </div>
+        </div>`;
+    });
+
+    // Sección de análisis asistido por IA
+    grid.innerHTML += `<div class="section-divider">Análisis</div>`;
+
+    SECCIONES_ANALYTICAL.forEach(s => {
+      grid.innerHTML += `
+        <div class="card loading analytical" id="card-${s.id}">
+          <div class="card-header">
+            <span class="card-title">${s.titulo}</span>
+            <div class="card-spinner" id="spin-${s.id}"></div>
+          </div>
+          <div class="card-meta" id="meta-${s.id}"></div>
+          <div class="sources" id="src-${s.id}"></div>
+          <div class="card-body" id="body-${s.id}">
+            <span class="card-loading-text">Generando...</span>
+          </div>
+        </div>`;
+    });
+  }
+
+  function renderFuentes(containerId, fuentes) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = fuentes.map(f =>
+      `<span class="src-badge ${SRC_CLASS[f] || 'src-paciente'}">${f}</span>`
+    ).join('');
+  }
+
+  function confBadge(nivel) {
+    const map = { Alta: 'conf-alta', Media: 'conf-media', Baja: 'conf-baja' };
+    const cls = map[nivel] || 'conf-nd';
+    const label = nivel || 'N/D';
+    return `<span class="conf-badge ${cls}" title="Nivel de confianza">⬤ ${label}</span>`;
+  }
+
+  function renderSeccion(seccion) {
+    let card = document.getElementById('card-' + seccion.id);
+    
+    // Si la tarjeta no existe, crearla dinámicamente
+    if (!card) {
+      const grid = document.getElementById('cards-grid');
+      const cardHtml = `
+        <div class="card done" id="card-${seccion.id}">
+          <div class="card-header">
+            <span class="card-title">${seccion.titulo}</span>
+            <div class="card-spinner" id="spin-${seccion.id}" style="display:none;"></div>
+            <span class="card-check">✓</span>
+          </div>
+          <div class="card-meta" id="meta-${seccion.id}"></div>
+          <div class="sources" id="src-${seccion.id}"></div>
+          <div class="card-body" id="body-${seccion.id}"></div>
+        </div>`;
+      grid.innerHTML += cardHtml;
+      card = document.getElementById('card-' + seccion.id);
+    }
+    
+    const spin = document.getElementById('spin-' + seccion.id);
+    const body = document.getElementById('body-' + seccion.id);
+    const meta = document.getElementById('meta-' + seccion.id);
+    const c    = seccion.contenido;
+
+    card.classList.remove('loading');
+    card.classList.add(seccion.estado === 'error' ? 'error' : 'done');
+    if (spin) spin.style.display = 'none';
+
+    const existingCheck = card.querySelector('.card-check');
+    if (!existingCheck) {
+      const check = document.createElement('span');
+      check.className = 'card-check';
+      check.textContent = seccion.estado === 'error' ? '✗' : '✓';
+      card.querySelector('.card-header').appendChild(check);
+    }
+
+    renderFuentes('src-' + seccion.id, seccion.fuentes);
+
+    // Confidence + date metadata
+    const nivel = c.plausibilidad?.nivel || c.nivel_confianza || '';
+    const ts    = new Date().toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
+    if (meta) {
+      meta.innerHTML = nivel ? confBadge(nivel) : '';
+    }
+
+    // Contradiction
+    let contraHtml = '';
+    const contra = c.contradiccion || c.contradiccion_fuentes;
+    if (contra && contra !== 'null' && contra !== null) {
+      contraHtml = `<div class="contradiccion">${contra}</div>`;
+    }
+
+    function _badge(texto, color) {
+      return `<div style="display:inline-block;padding:3px 10px;border-radius:20px;background:color-mix(in srgb,${color} 15%,transparent);color:${color};font-weight:700;font-size:0.8rem;margin-bottom:8px;">${texto}</div>`;
+    }
+    function _subseccion(titulo, contenidoHtml) {
+      return `<div style="margin-bottom:14px;padding:10px 14px;background:var(--surface2);border-radius:8px;border-left:3px solid var(--accent-dim);">
+        <b style="font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">${titulo}</b>
+        ${contenidoHtml}
+      </div>`;
+    }
+
+    let html = '';
+    if (seccion.id === 'mecanistica') {
+      const plaus = c.plausibilidad || {};
+      const ruta  = c.ruta_biologica || {};
+      const rut   = c.rutas_no_seguridad || {};
+      const genes = c.tabla_genes_evidencia || [];
+      const pgx   = c.validacion_farmacogenetica || {};
+
+      const nivel = plaus.nivel || 'Desconocida';
+      const plColor = nivel==='Alta'?'var(--success)':nivel==='Media'?'var(--warn)':nivel==='Baja'?'var(--danger)':'var(--text-muted)';
+
+      const offTargets = (rut.dianas_off_target||[]).map(d=>`<li>${d.gen?`<b>[${d.gen}]</b> `:''} ${d.relacion_ram||''}</li>`).join('');
+      const genesHtml  = genes.map(g=>`<tr><td><b>${g.gen||''}</b></td><td>${g.nivel_evidencia||''}</td><td>${g.efecto||''}</td></tr>`).join('');
+
+      html = _subseccion('Plausibilidad',
+        `${_badge(nivel, plColor)}
+         <div style="font-size:0.83rem;margin-top:4px;">${plaus.justificacion||''}</div>`)
+           + _subseccion('Ruta Biológica',
+        `${ruta.estado ? `<div style="font-size:0.8rem;color:var(--text-muted);"><b>Estado:</b> ${ruta.estado}</div>` : ''}
+         <div style="font-size:0.83rem;margin-top:4px;"><b>Diana:</b> ${ruta.diana_principal||'N/D'}</div>
+         <div style="font-size:0.83rem;margin-top:4px;">${ruta.via||''}</div>
+         ${ruta.cyp_implicado?`<div style="font-size:0.83rem;margin-top:4px;"><b>CYP:</b> ${ruta.cyp_implicado}</div>`:''}`)
+           + _subseccion('Rutas de No Seguridad',
+        `${offTargets?`<div style="font-size:0.83rem;"><b>Off-target:</b><ul>${offTargets}</ul></div>`:''}
+         <div style="font-size:0.83rem;margin-top:4px;">${rut.mecanismo_toxicidad||''}</div>`)
+           + _subseccion('Farmacogenética',
+        `${genesHtml
+          ? `<table class="bio-table"><thead><tr><th>Gen</th><th>Evidencia</th><th>Efecto</th></tr></thead><tbody>${genesHtml}</tbody></table>`
+          : '<span style="color:var(--text-muted);font-size:0.83rem;">Sin genes con evidencia farmacogenética relevante</span>'}
+         ${(typeof pgx === 'string' && pgx)
+           ? `<div style="font-size:0.83rem;margin-top:10px;padding-top:8px;border-top:1px solid var(--border);color:var(--text-muted);">${pgx}</div>`
+           : ''}`);
+
+    } else if (seccion.id === 'clinica') {
+      const afr  = c.analisis_factores_riesgo || {};
+      const vol  = c.volumen_casos || {};
+      const ft   = c.ficha_tecnica || {};
+
+      const nivel   = afr.nivel_riesgo || 'Indeterminado';
+      const nColor  = nivel==='Alto'?'var(--danger)':nivel==='Moderado'?'var(--warn)':nivel==='Bajo'?'var(--success)':'var(--text-muted)';
+      const factores = (afr.factores_adicionales||[]).map(f=>`<li>${f}</li>`).join('');
+      const senalColor = (vol.senal||'').includes('Establecida')?'var(--warn)':(vol.senal||'').includes('Incipiente')?'var(--accent)':'var(--success)';
+      const ftKnown = ft.ram_recogida === true || ['si', 'sí', 'true', 'conocida'].includes(String(ft.ram_recogida || '').toLowerCase());
+      const ftColor = ftKnown ? 'var(--success)' : 'var(--danger)';
+
+      html = _subseccion('Análisis Factores de Riesgo',
+        `${_badge('Riesgo: '+nivel, nColor)}
+         <div style="font-size:0.83rem;margin-top:4px;">${afr.perfil_paciente||''}</div>
+         ${factores?`<div style="font-size:0.83rem;margin-top:4px;"><b>Factores adicionales:</b><ul>${factores}</ul></div>`:''}
+         <div style="font-size:0.83rem;margin-top:4px;color:var(--text-muted);">${afr.justificacion||''}</div>`)
+           + _subseccion('Volumen de Casos',
+        `${_badge('Señal: '+(vol.senal||'N/D'), senalColor)}
+         <div style="font-size:0.83rem;margin-top:4px;"><b>FAERS:</b> ${vol.total_faers||'N/D'}</div>
+         <div style="font-size:0.83rem;margin-top:4px;">${vol.interpretacion||''}</div>`)
+           + _subseccion('Ficha Técnica',
+          `${_badge(ftKnown ? 'CONOCIDA' : 'DESCONOCIDA', ftColor)}
+         <div style="font-size:0.83rem;margin-top:4px;">${ft.estado||''} · ${ft.fuente||''}</div>`);
+
+    } else if (seccion.id === 'regulatoria') {
+      const senal = c.estado_senal || {};
+      const acc   = c.accion || {};
+      const estadoColor = (senal.estado||'').toLowerCase().includes('reconocida')?'var(--success)':(senal.estado||'').toLowerCase().includes('evaluaci')?'var(--warn)':'var(--danger)';
+
+      html = _subseccion('Estado de Señal',
+        `${_badge(senal.estado||'N/D', estadoColor)}
+         ${senal.epitt?`<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">EPITT: ${senal.epitt}</div>`:''}
+         <div style="font-size:0.83rem;margin-top:4px;">${senal.detalle||''}</div>`)
+           + _subseccion('Acción',
+        `<div style="font-size:0.83rem;"><b>${acc.recomendada||'N/D'}</b></div>
+         <div style="font-size:0.83rem;margin-top:4px;color:var(--text-muted);">${acc.justificacion||''}</div>`)
+           + _subseccion('Conclusión Regulatoria',
+        `<div style="font-size:0.85rem;">${c.conclusion_regulatoria||''}</div>`);
+
+    } else if (seccion.id === 'cima_raw') {
+      const ftUrl = c.ft_url || '';
+      const ftLink = ftUrl
+        ? `<a href="${ftUrl}" target="_blank" style="color:#a78bfa;font-weight:600;">Ver Ficha Técnica PDF →</a>`
+        : `<span style="color:var(--text-muted)">Ficha técnica no disponible</span>`;
+      const texto = c.texto || '';
+      const sinResultados = /^la\s+ram\s+['"].+['"]\s+no\s+aparece\s+en\s+la\s+ficha\s+t[ée]cnica\s+de\s+cima\.?$/i.test(texto.trim())
+        || texto.startsWith('Sin resultados en CIMA')
+        || texto.startsWith('Ficha técnica no disponible');
+
+      if (sinResultados) {
+        html = `
+          <div style="margin-bottom:10px;">${ftLink}</div>
+          <div style="padding:12px 14px;background:color-mix(in srgb,var(--surface2) 90%,#f87171 10%);border-radius:8px;border-left:3px solid #f87171;">
+            <b style="font-size:0.78rem;color:#f87171;text-transform:uppercase;letter-spacing:0.05em;">Sin coincidencias RAM en CIMA</b><br/>
+            <span style="font-size:0.85rem;">${texto || 'No se encontraron coincidencias en ficha técnica.'}</span>
+          </div>`;
+      } else {
+      const bloques = texto.split('\n\n---\n\n').filter(b => b.trim());
+      const CIMA_NOMBRES = {
+        '4.3': '4.3 · Contraindicaciones',
+        '4.4': '4.4 · Advertencias y precauciones especiales',
+        '4.5': '4.5 · Interacción con otros medicamentos',
+        '4.8': '4.8 · Reacciones adversas',
+        '4.9': '4.9 · Sobredosis',
+        '5.1': '5.1 · Propiedades farmacodinámicas',
+        '5.2': '5.2 · Propiedades farmacocinéticas',
+      };
+      let cimaHtml = '';
+      for (const bloque of bloques) {
+        const numM = bloque.match(/^(\d+)\.(\d+)/);
+        const key = numM ? `${numM[1]}.${numM[2]}` : null;
+        const header = key ? (CIMA_NOMBRES[key] || key) : 'Información';
+        const isRAM = key === '4.8';
+        const borderColor = isRAM ? '#a78bfa' : '#7c3aed';
+        cimaHtml += `<div style="margin-bottom:10px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid ${borderColor};">
+          <b style="font-size:0.78rem;color:#a78bfa;text-transform:uppercase;display:block;margin-bottom:4px;">${header}</b>
+          <div style="font-size:0.82rem;line-height:1.6;white-space:pre-wrap;">${bloque.trim()}</div>
+        </div>`;
+      }
+      html = `
+        <div style="margin-bottom:10px;">${ftLink}</div>
+        <div style="max-height:300px;overflow:auto;">
+          ${cimaHtml || `<span style="color:var(--text-muted);font-size:0.82rem;">Sin secciones encontradas</span>`}
+        </div>`;
+      }
+
+    } else if (seccion.id === 'drugbank_raw') {
+      const texto = c.texto || '';
+      const bloques = texto.split('\n\n').filter(b => b.trim());
+      let dbHtml = '';
+      for (let i = 0; i < bloques.length; i++) {
+        const bloque = bloques[i].trim();
+        if (i === 0) {
+          // Bloque de cabecera: === DrugBank: INN (ID) === + metadatos
+          const lineas = bloque.split('\n');
+          const titulo = lineas[0].replace(/=/g, '').trim();
+          const meta   = lineas.slice(1).join('\n').trim();
+          dbHtml += `<div style="margin-bottom:12px;padding:6px 12px;background:color-mix(in srgb,var(--surface2) 90%,#6366f1 10%);border-radius:6px;border-left:3px solid #6366f1;">
+            <b style="font-size:0.82rem;color:#6366f1;">${titulo}</b>
+            ${meta ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;white-space:pre-wrap;">${meta}</div>` : ''}
+          </div>`;
+        } else {
+          const lineas = bloque.split('\n');
+          const header  = lineas[0].trim().replace(/:$/, '');
+          const content = lineas.slice(1).join('\n').trim();
+          if (!header) continue;
+          dbHtml += `<div style="margin-bottom:8px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #6366f1;">
+            <b style="font-size:0.78rem;color:#6366f1;text-transform:uppercase;display:block;margin-bottom:4px;">${header}</b>
+            ${content ? `<div style="font-size:0.82rem;line-height:1.5;white-space:pre-wrap;">${content}</div>` : ''}
+          </div>`;
+        }
+      }
+      html = `<div style="max-height:300px;overflow:auto;">
+        ${dbHtml || `<div style="white-space:pre-wrap;font-size:0.8rem;line-height:1.5;">${texto}</div>`}
+      </div>`;
+
+    } else if (seccion.id === 'pubmed_raw') {
+      const secciones = c.pubmed_secciones;
+      let pubHtml = '';
+      if (secciones && secciones.length > 0) {
+        const totalDescargados = secciones.reduce((s, sec) => s + (sec.articulos || []).length, 0);
+        pubHtml += `<div style="margin-bottom:12px;padding:6px 12px;background:color-mix(in srgb,var(--surface2) 90%,#34d399 10%);border-radius:6px;border-left:3px solid #34d399;">
+          <span style="font-size:0.78rem;color:#34d399;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Artículos seleccionados: ${totalDescargados}</span>
+        </div>`;
+        for (const sec of secciones) {
+          const arts = sec.articulos || [];
+          const terminoPrincipal = (sec.terminos_busqueda || [])[0] || '';
+          const borderCol = arts.length ? '#34d399' : 'var(--border)';
+          pubHtml += `<div style="margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid ${borderCol};">
+            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:${arts.length ? '8px' : '0'};">
+              <b style="font-size:0.78rem;color:${arts.length ? '#34d399' : 'var(--text-muted)'};text-transform:uppercase;">${sec.etiqueta}</b>
+              ${arts.length
+                ? `<span style="font-size:0.73rem;color:var(--text-muted);">${sec.n_encontrados} encontrados en PubMed</span>`
+                : `<span style="font-size:0.73rem;color:var(--text-muted);font-style:italic;">Sin resultados</span>`}
+            </div>`;
+          if (arts.length === 0) {
+            pubHtml += '';
+          } else {
+            for (const art of arts) {
+              const uid = `abs_${art.pmid}_${Math.random().toString(36).slice(2,6)}`;
+              const abstractText = (art.abstract || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+              const lltOrigenes = (art.llt_origenes || []).filter(t => t && t !== terminoPrincipal);
+              const origenTexto = lltOrigenes.length
+                ? `LLT origen: ${lltOrigenes.join(', ')}`
+                : (terminoPrincipal ? `Coincidió con: ${terminoPrincipal}` : 'Coincidencia sin término detallado');
+              pubHtml += `<div style="margin-bottom:6px;">
+                <div onclick="togglePubAbstract('${uid}',this)" style="cursor:pointer;display:flex;align-items:flex-start;gap:6px;padding:5px 8px;border-radius:4px;background:color-mix(in srgb,var(--surface) 80%,var(--surface2) 20%);">
+                  <span class="pm-arrow" style="color:#34d399;font-size:0.75rem;flex-shrink:0;margin-top:2px;">▶</span>
+                  <div style="flex:1;">
+                    <span style="font-size:0.82rem;line-height:1.4;">${art.titulo || '(sin título)'}</span>
+                    <a href="https://pubmed.ncbi.nlm.nih.gov/${art.pmid}/" target="_blank" onclick="event.stopPropagation()" style="margin-left:8px;font-size:0.72rem;color:#34d399;white-space:nowrap;">PMID ${art.pmid}</a>
+                    <div style="margin-top:2px;font-size:0.71rem;color:var(--text-muted);">${origenTexto}</div>
+                  </div>
+                </div>
+                <div id="${uid}" style="display:none;padding:8px 10px 4px 24px;font-size:0.78rem;line-height:1.55;color:var(--text-muted);white-space:pre-wrap;">${abstractText || 'Abstract no disponible.'}</div>
+              </div>`;
+            }
+          }
+          pubHtml += `</div>`;
+        }
+      } else {
+        // fallback: parseo del texto plano (compatibilidad)
+        const texto = c.texto || '';
+        const bloques = texto.split(/─{3,}/);
+        for (const bloque of bloques) {
+          if (!bloque.trim()) continue;
+          const tituloM = bloque.match(/([A-ZÁÉÍÓÚ\s]+)\s*\((\d+) artículos encontrados\)/);
+          const urlsM   = bloque.match(/URLs:\s*(.+)/);
+          if (!tituloM) continue;
+          const titulo = tituloM[1].trim();
+          const n      = tituloM[2];
+          const links  = urlsM ? urlsM[1].split('|').map(u => u.trim()).filter(Boolean) : [];
+          const pmids  = links.map(u => {
+            const m = u.match(/\/(\d+)\/?$/);
+            return m ? `<a href="${u}" target="_blank" style="color:#34d399;font-size:0.8rem;">PMID ${m[1]}</a>` : '';
+          }).filter(Boolean).join(' · ');
+          pubHtml += `<div style="margin-bottom:10px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #34d399;">
+            <b style="font-size:0.78rem;color:#34d399;">${titulo}</b>
+            <span style="font-size:0.75rem;color:var(--text-muted);margin-left:8px;">${n} artículos</span>
+            ${pmids ? `<div style="margin-top:6px;">${pmids}</div>` : '<div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;">Sin artículos</div>'}
+          </div>`;
+        }
+      }
+      html = pubHtml || `<span style="color:var(--text-muted);font-size:0.82rem;">Sin resultados en PubMed</span>`;
+
+    } else if (seccion.id === 'prac_raw') {
+      const texto = c.texto || '';
+      const sinResultados = !texto.trim()
+        || texto.startsWith('No se encontraron')
+        || texto.startsWith('Datos PRAC')
+        || /no aparece en las actas PRAC/i.test(texto);
+      if (sinResultados) {
+        html = `
+          <div style="padding:12px 14px;background:color-mix(in srgb,var(--surface2) 90%,#f87171 10%);border-radius:8px;border-left:3px solid #f87171;margin-bottom:12px;">
+            <b style="font-size:0.78rem;color:#f87171;text-transform:uppercase;letter-spacing:0.05em;">Sin coincidencias</b><br/>
+            <span style="font-size:0.85rem;">${texto || 'No se identificaron coincidencias en PRAC/EMA.'}</span>
+          </div>`;
+      } else {
+        const docs = (texto.match(/^──\s+/gm) || []).length;
+        const badgeColor = docs > 0 ? '#34d399' : '#f59e0b';
+        const badgeText = docs > 0
+          ? `${docs} documento(s) PRAC/EMA con fragmentos relevantes`
+          : 'Se encontraron menciones, pero sin fragmentos estructurados';
+        html = `
+          <div style="padding:10px 14px;background:color-mix(in srgb,var(--surface2) 90%,${badgeColor} 10%);border-radius:8px;border-left:3px solid ${badgeColor};margin-bottom:14px;">
+            <b style="font-size:0.78rem;color:${badgeColor};text-transform:uppercase;letter-spacing:0.05em;">PRAC/EMA · Señales</b><br/>
+            <span style="font-size:0.85rem;">${badgeText}</span>
+          </div>
+          <div style="white-space: pre-wrap; font-size: 0.8rem; line-height: 1.5;">${texto}</div>`;
+      }
+
+    } else if (seccion.id === 'reactome_raw') {
+      const pathways = c.pathways || [];
+      if (pathways.length > 0) {
+        html = `<div style="font-size:0.82rem;line-height:1.8;">` +
+          pathways.map(p =>
+            `<div><a href="${p.url}" target="_blank" style="color:#22d3ee;font-weight:600;">[${p.stId}]</a> ${p.name}</div>`
+          ).join('') +
+          `</div>`;
+      } else {
+        html = `<span style="color:var(--text-muted);font-size:0.82rem;">${c.texto || 'Sin pathways encontrados'}</span>`;
+      }
+
+    } else if (seccion.id === 'pharmgkb_raw') {
+      const gd = c.genes_data || {};
+      const renderGrupo = (genes, titulo, color) => {
+        if (!genes || !genes.length) return '';
+        const bloques = genes.map(g => {
+          const badges = [
+            g.tiene_etiquetas_fda_ema ? `<span style="background:#1e3a5f;color:#60a5fa;padding:1px 6px;border-radius:10px;font-size:0.72rem;">FDA/EMA</span>` : '',
+            g.tiene_guias_cpic_dpwg   ? `<span style="background:#3b1f5e;color:#c084fc;padding:1px 6px;border-radius:10px;font-size:0.72rem;">CPIC/DPWG</span>` : '',
+          ].filter(Boolean).join(' ');
+          const enfermedades = (g.enfermedades || []).join(', ') || '—';
+          const contextos = (g.contextos_clinicos || []).join(', ') || '—';
+
+          const fenotiposHtml = (g.alelo_fenotipos || []).map(fp => {
+            const alelo = fp.alelo ? `<span style="font-weight:600;color:${color};margin-right:4px;">${fp.alelo}</span>` : '';
+            return `<div style="margin-bottom:4px;">${alelo}${fp.fenotipo||''}</div>`;
+          }).join('') || '<span style="color:var(--text-muted);">—</span>';
+
+          return `<div style="padding:10px 12px;border:1px solid color-mix(in srgb, ${color} 22%, var(--border));border-radius:10px;background:var(--surface2);margin-bottom:8px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+              <div>
+                <b style="font-size:0.95rem;">${g.gen||''}</b>
+                <span style="margin-left:8px;color:${color};font-weight:700;">${g.nivel_evidencia||''}</span>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">${badges}</div>
+            </div>
+            <div style="margin-top:8px;font-size:0.8rem;line-height:1.55;display:grid;grid-template-columns:1fr;gap:4px;">
+              <div><b>Información recogida:</b></div>
+              <div><b>enfermedades:</b> ${enfermedades}</div>
+              <div><b>contextos_clinicos:</b> ${contextos}</div>
+            </div>
+            <div style="margin-top:8px;font-size:0.8rem;line-height:1.45;">
+              <b>Alelo/Fenotipo:</b>
+              <div style="max-height:120px;overflow-y:auto;margin-top:4px;">${fenotiposHtml}</div>
+            </div>
+          </div>`;
+        }).join('');
+        return `<div style="margin-bottom:12px;">
+          <b style="font-size:0.75rem;color:${color};text-transform:uppercase;letter-spacing:0.05em;">${titulo}</b>
+          <div style="margin-top:4px;">${bloques}</div>
+        </div>`;
+      };
+      const fuertes    = renderGrupo(gd.evidencia_fuerte_1A_1B,    'Evidencia fuerte (1A/1B)',    '#4ade80');
+      const secundarios = renderGrupo(gd.evidencia_secundaria_2A_2B, 'Evidencia secundaria (2A/2B)', '#f59e0b');
+      const bajaDatos  = gd.evidencia_baja_referencia;
+      const bajos      = Array.isArray(bajaDatos)
+        ? renderGrupo(bajaDatos, 'Evidencia baja / referencia (3+)', '#9ca3af')
+        : '';
+      if (fuertes || secundarios || bajos) {
+        html = `<div>${fuertes}${secundarios}${bajos}</div>`;
+      } else if (c.texto && !c.texto.includes('Sin datos')) {
+        // Hay texto de error o resultado alternativo — mostrarlo
+        html = `<div style="white-space:pre-wrap;font-size:0.8rem;line-height:1.5;max-height:300px;overflow:auto;">${c.texto}</div>`;
+      } else {
+        html = `<span style="color:var(--text-muted);font-size:0.82rem;">Sin datos farmacogenéticos para este fármaco en PharmGKB</span>`;
+      }
+
+    } else if (seccion.id === 'fda_raw') {
+      const r = c.fda_refs || {};
+      if (r.pt) {
+        const apiUrl = `https://api.fda.gov/drug/event.json?search=patient.drug.medicinalproduct:%22${encodeURIComponent(r.farmaco_en||'')}%22%20AND%20patient.reaction.reactionmeddrapt:%22${encodeURIComponent(r.pt)}%22`;
+        const llts = r.llts || [];
+        const totalLlts = llts.reduce((s, l) => s + (l.total || 0), 0);
+        const fdaBase = `https://api.fda.gov/drug/event.json?search=patient.drug.medicinalproduct:%22${encodeURIComponent(r.farmaco_en||'')}%22%20AND%20patient.reaction.reactionmeddrapt:`;
+        const hdr = (txt) => `<b style="font-size:0.78rem;color:#60a5fa;text-transform:uppercase;display:block;margin-bottom:4px;">${txt}</b>`;
+        const lltLine = llts.length > 0 ? `
+          <div style="margin-top:8px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #60a5fa;">
+            ${hdr('Para LLTs')}
+            <div style="font-size:0.82rem;margin-bottom:4px;"><b>${totalLlts.toLocaleString()} casos</b></div>
+            ${llts.map(l => `<div style="font-size:0.79rem;margin-top:2px;color:var(--text-muted);">· ${l.termino}: <b style="color:var(--text);">${l.total.toLocaleString()} casos</b> <a href="${fdaBase}%22${encodeURIComponent(l.termino)}%22" target="_blank" style="color:#60a5fa;font-size:0.75rem;">enlace</a></div>`).join('')}
+          </div>
+          <div style="margin-top:8px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #60a5fa;">
+            ${hdr('En conjunto')}
+            <div style="font-size:0.82rem;"><b>${(r.total_combinado||0).toLocaleString()} casos</b></div>
+          </div>` : '';
+        html = `
+          <div style="padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #60a5fa;margin-bottom:4px;">
+            ${hdr('Para PT · ' + r.pt)}
+            <div style="font-size:0.82rem;"><b>${(r.total_pt||0).toLocaleString()} casos</b> <a href="${apiUrl}" target="_blank" style="color:#60a5fa;font-size:0.8rem;">enlace</a></div>
+          </div>
+          ${lltLine}`;
+      } else {
+        html = `<div style="white-space:pre-wrap;font-size:0.8rem;line-height:1.5;">${c.texto || 'No disponible'}</div>`;
+      }
+    }
+
+    body.innerHTML = `<div class="card-body">${html}</div>${contraHtml}`;
+
+    // Store for chat context
+    reportData.secciones[seccion.id] = {
+      titulo: seccion.titulo,
+      fuentes: seccion.fuentes,
+      contenido: c,
+      fecha: new Date().toISOString()
+    };
+  }
+
+  async function generate() {
+    const btn = document.getElementById('generate-btn');
+    btn.disabled = true;
+    document.getElementById('log').innerHTML = '';
+    document.getElementById('informe-header').style.display = 'none';
+    document.getElementById('cards-grid').style.display = 'none';
+    chatReady = false;
+    chatHistory = [];
+    document.getElementById('chat-messages').innerHTML = `
+      <div id="chat-welcome">
+        <div class="wi">💊</div>
+        <p>Haz una pregunta sobre el análisis o pulsa una sección para empezar.</p>
+      </div>`;
+
+    reportData = {
+      farmaco:    document.getElementById('farmaco').value.trim(),
+      ram: '', cod_dedra: document.getElementById('cod-dedra').value.trim(),
+      desc_dedra: '', 
+      edad:       document.getElementById('edad').value.trim(),
+      sexo:       document.getElementById('sexo').value,
+      etnia:      document.getElementById('etnia').value.trim(),
+      secciones: {}, generatedAt: new Date().toISOString()
+    };
+
+    const selectedFarmacoInn = farmacoResolved && farmacoResolved.inn ? farmacoResolved.inn : '';
+    const selectedFarmacoName = farmacoResolved && farmacoResolved.name ? farmacoResolved.name : document.getElementById('farmaco-input').value.trim();
+    const selectedRamEn = meddraResolved && meddraResolved.name_en ? meddraResolved.name_en : '';
+    const selectedRamEs = meddraResolved && meddraResolved.name_es ? meddraResolved.name_es : '';
+    const selectedLltsEn = (meddraResolved && Array.isArray(meddraResolved.llts_en)) ? meddraResolved.llts_en : [];
+
+    if (!selectedFarmacoInn || !selectedFarmacoName || !selectedRamEn) {
+      log('ERROR: selecciona un fármaco y una RAM válidos antes de generar el análisis.');
+      btn.disabled = false;
+      return;
+    }
+
+    const fd = new FormData();
+    fd.append('farmaco',   selectedFarmacoName);
+    fd.append('farmaco_inn', selectedFarmacoInn);
+    fd.append('farmaco_es', selectedFarmacoName);
+    fd.append('cod_dedra', reportData.cod_dedra);
+    fd.append('ram_en', selectedRamEn);
+    fd.append('ram_es', selectedRamEs);
+    fd.append('llts_en_json', JSON.stringify(selectedLltsEn));
+    fd.append('edad',      reportData.edad);
+    fd.append('sexo',      reportData.sexo);
+    fd.append('etnia',     reportData.etnia);
+    fd.append('narrativa', (document.getElementById('narrativa') || {value:''}).value.trim());
+
+    const res = await fetch('/generate_manual', { method: 'POST', body: fd });
+    if (!res.ok || !res.body) {
+      const errorText = await res.text();
+      log(`ERROR: no se pudo iniciar la generación (${res.status}). ${errorText}`);
+      btn.disabled = false;
+      return;
+    }
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    crearTarjetas();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const evt = JSON.parse(line.slice(5).trim());
+
+        if (evt.tipo === 'progreso') {
+          log(evt.mensaje);
+
+        } else if (evt.tipo === 'cabecera') {
+          reportData.ram       = evt.ram;
+          reportData.desc_dedra = evt.desc_dedra;
+          reportData.caso      = evt.caso;
+          const meta = document.getElementById('informe-meta');
+          const mr = meddraResolved;
+          const ramEn = evt.ram_en || (mr && mr.name_en) || 'N/D';
+          const ramEs = evt.ram    || (mr && mr.name_es) || 'N/D';
+          const termType = mr ? mr.type : '';
+
+          let meddraExtra = '';
+          if (mr && mr.type === 'LLT' && mr.pt_code) {
+            meddraExtra += `<div style="margin-left:20px;font-size:0.85rem;color:var(--text-muted);">→ PT padre: <b style="color:var(--text);">${mr.pt_code} — ${mr.pt_name_en || ''}</b></div>`;
+            if (mr.pt_name_es) meddraExtra += `<div style="margin-left:36px;font-size:0.85rem;color:var(--text-muted);">ES: <b style="color:var(--text);">${mr.pt_name_es}</b></div>`;
+          }
+
+          meta.innerHTML = `
+            <div style="line-height:2;font-size:0.92rem;">
+              <div>Fármaco: <b>${evt.farmaco || 'N/D'}</b></div>
+              ${evt.farmaco_inn ? `<div style="margin-left:20px;color:var(--text);">→ Fármaco INN: <b>${evt.farmaco_inn}</b></div>` : ''}
+              <div style="margin-top:8px;">Código RAM: <b>${evt.cod_dedra || 'N/D'}</b>${termType ? ` <span style="font-size:0.75rem;background:${termType==='PT'?'#1a3a2a':'#1a2a3a'};color:${termType==='PT'?'#4caf88':'#60a5fa'};padding:1px 7px;border-radius:10px;margin-left:6px;">${termType}</span>` : ''}</div>
+              <div style="margin-left:20px;color:var(--text);font-weight:700;">→ RAM [EN]: ${ramEn}</div>
+              <div style="margin-left:20px;color:var(--text);font-weight:700;">→ RAM [ES]: ${ramEs}</div>
+              ${meddraExtra}
+            </div>`;
+          document.getElementById('informe-header').style.display = 'block';
+
+        } else if (evt.tipo === 'seccion') {
+          renderSeccion(evt);
+
+        } else if (evt.tipo === 'error') {
+          log('ERROR: ' + evt.mensaje);
+
+        } else if (evt.tipo === 'fin') {
+          log(evt.mensaje);
+          btn.disabled = false;
+          chatSessionId = evt.session_id || null;
+          onGenerationComplete();
+        }
+      }
+    }
+  }
+
+  function onGenerationComplete() {
+    chatReady = true;
+    // Open chat panel automatically
+    document.getElementById('chat-panel').classList.add('open');
+    document.getElementById('chat-fab').classList.remove('visible');
+    // Remove welcome placeholder from chat
+    const welcome = document.getElementById('chat-welcome');
+    if (welcome) welcome.remove();
+    appendChatMsg('ai', `Análisis completado para **${reportData.farmaco}** (${reportData.cod_dedra}).
+Puedes preguntarme sobre cualquier sección o pedirme que amplíe, contraste o simplifique algún bloque.`);
+  }
+
+  /* ─────────────────────────────────────────────
+     Chat panel
+  ───────────────────────────────────────────── */
+  function togglePubAbstract(uid, titleEl) {
+    const el = document.getElementById(uid);
+    if (!el) return;
+    const open = el.style.display === 'none' || el.style.display === '';
+    el.style.display = open ? 'block' : 'none';
+    const arrow = titleEl ? titleEl.querySelector('.pm-arrow') : null;
+    if (arrow) arrow.textContent = open ? '▼' : '▶';
+  }
+
+  function toggleChat() {
+    const panel = document.getElementById('chat-panel');
+    const fab   = document.getElementById('chat-fab');
+    const isOpen = panel.classList.toggle('open');
+    if (isOpen) {
+      fab.classList.remove('visible');
+    } else if (chatReady) {
+      fab.classList.add('visible');
+    }
+  }
+
+  function appendChatMsg(role, text) {
+    const msgs = document.getElementById('chat-messages');
+    // Remove welcome placeholder if still there
+    const w = document.getElementById('chat-welcome');
+    if (w) w.remove();
+
+    const wrap = document.createElement('div');
+    wrap.className = `cmsg ${role}`;
+
+    const label = document.createElement('div');
+    label.className = 'cmsg-label';
+    label.textContent = role === 'user' ? 'Tú' : 'DrugWatch IA';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'cbubble';
+    bubble.textContent = text;
+
+    wrap.appendChild(label);
+    wrap.appendChild(bubble);
+    msgs.appendChild(wrap);
+    msgs.scrollTop = msgs.scrollHeight;
+    return bubble;
+  }
+
+  function showChatTyping() {
+    const msgs = document.getElementById('chat-messages');
+    const wrap = document.createElement('div');
+    wrap.className = 'cmsg ai';
+    wrap.id = 'chat-typing';
+    const label = document.createElement('div');
+    label.className = 'cmsg-label';
+    label.textContent = 'DrugWatch IA';
+    const bubble = document.createElement('div');
+    bubble.className = 'cbubble typing-dots';
+    bubble.innerHTML = '<span></span><span></span><span></span>';
+    wrap.appendChild(label);
+    wrap.appendChild(bubble);
+    msgs.appendChild(wrap);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function removeChatTyping() {
+    const t = document.getElementById('chat-typing');
+    if (t) t.remove();
+  }
+
+  function setPillActive(id) {
+    document.querySelectorAll('.section-pill').forEach(p => p.classList.remove('active'));
+    if (activePill) activePill.classList.remove('active');
+    if (id) {
+      const map = { mecanistica: 0, clinica: 1, regulatoria: 2 };
+      const pills = document.querySelectorAll('.section-pill');
+      const idx = map[id];
+      if (idx !== undefined && pills[idx]) pills[idx].classList.add('active');
+    }
+  }
+
+  async function askSection(sectionId) {
+    if (!chatReady) return;
+    const sec = reportData.secciones[sectionId];
+    const titles = { mecanistica: 'Dimension Mecanistica', clinica: 'Dimension Clinica', regulatoria: 'Dimension Regulatoria' };
+    const title = titles[sectionId] || sectionId;
+
+    // Open panel if closed
+    document.getElementById('chat-panel').classList.add('open');
+    document.getElementById('chat-fab').classList.remove('visible');
+
+    setPillActive(sectionId);
+
+    const question = `Explica y amplía la sección "${title}" del análisis.`;
+    document.getElementById('chat-textarea').value = question;
+    document.getElementById('chat-textarea').focus();
+  }
+
+  function scrollToCard(cardId) {
+    const card = document.getElementById(`card-${cardId}`);
+    if (card) {
+      const grid = document.getElementById('cards-grid');
+      if (grid) {
+        grid.parentElement.scrollTop = card.offsetTop - 100;
+      }
+      card.style.borderColor = 'var(--accent)';
+      setTimeout(() => {
+        card.style.borderColor = 'var(--border)';
+      }, 2000);
+    }
+  }
+
+  async function chatSend() {
+    if (!chatReady) return;
+    const textarea = document.getElementById('chat-textarea');
+    const text = textarea.value.trim();
+    if (!text) return;
+
+    appendChatMsg('user', text);
+    chatHistory.push({ role: 'user', content: text });
+    textarea.value = '';
+    chatResize(textarea);
+    document.getElementById('chat-send').disabled = true;
+
+    // Clear active pill
+    setPillActive(null);
+
+    showChatTyping();
+
+    const fd = new FormData();
+    fd.append('message', text);
+    fd.append('session_id', chatSessionId || '');
+    fd.append('history', JSON.stringify(chatHistory.slice(0, -1)));
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 75000);
+      const res  = await fetch('/chat', { method: 'POST', body: fd, signal: controller.signal });
+      clearTimeout(timeoutId);
+      const data = await res.json().catch(() => ({}));
+      removeChatTyping();
+      const reply = data.response || '(sin respuesta)';
+      appendChatMsg('ai', reply);
+      chatHistory.push({ role: 'assistant', content: reply });
+    } catch (err) {
+      removeChatTyping();
+      if (err && err.name === 'AbortError') {
+        appendChatMsg('ai', '❌ Tiempo de espera agotado (75s). Intenta una pregunta más corta.');
+      } else {
+        appendChatMsg('ai', '❌ Error de conexión con el servidor.');
+      }
+    }
+
+    document.getElementById('chat-send').disabled = false;
+    textarea.focus();
+  }
+
+  function chatKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatSend(); }
+  }
+
+  function chatResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+  }
+
+  /* ─────────────────────────────────────────────
+     Theme toggle
+  ───────────────────────────────────────────── */
+  function toggleTheme() {
+    const isLight = document.documentElement.classList.toggle('light');
+    document.getElementById('theme-label').textContent = isLight ? 'Modo oscuro' : 'Modo claro';
+    document.querySelector('#theme-btn').firstChild.textContent = isLight ? '🌕 ' : '🌙 ';
+  }
+</script>
+</body>
+</html>
