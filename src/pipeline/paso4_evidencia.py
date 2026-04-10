@@ -4,6 +4,13 @@ import json
 import unicodedata
 import requests
 import boto3
+from botocore.config import Config
+
+BEDROCK_CONFIG = Config(
+    connect_timeout=8,
+    read_timeout=55,
+    retries={"max_attempts": 1, "mode": "standard"},
+)
 import pdfplumber
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
@@ -16,11 +23,6 @@ from terminology import rxnorm_to_inn, meddra_code_to_name, meddra_pt_to_llts
 import drugbank
 from dotenv import load_dotenv
 
-load_dotenv()
-
-INFERENCE_PROFILE_ARN = os.environ["INFERENCE_PROFILE_ARN"]
-MODEL_HAIKU  = INFERENCE_PROFILE_ARN
-REGION       = INFERENCE_PROFILE_ARN.split(":")[3]
 
 # Reintentos por defecto
 MAX_REINTENTOS = 3
@@ -94,7 +96,18 @@ def traducir_meddra_a_ingles(cod_dedra: str) -> str | None:
 
 def _llamar_llm(prompt: str) -> str:
     """Llama a Claude Haiku via AWS Bedrock."""
-    client = boto3.client("bedrock-runtime", region_name=REGION)
+    load_dotenv(override=True)
+    INFERENCE_PROFILE_ARN = os.environ["INFERENCE_PROFILE_ARN"]
+    MODEL_HAIKU = INFERENCE_PROFILE_ARN
+    REGION = INFERENCE_PROFILE_ARN.split(":")[3]
+    client = boto3.client(
+        "bedrock-runtime",
+        region_name=REGION,
+        aws_access_key_id=os.environ["aws_access_key_id"],
+        aws_secret_access_key=os.environ["aws_secret_access_key"],
+        aws_session_token=os.environ.get("aws_session_token"),
+        config=BEDROCK_CONFIG,
+    )
     body = json.dumps({
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": 2048,

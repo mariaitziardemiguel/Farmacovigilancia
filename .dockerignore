@@ -1,2 +1,11 @@
 .venv
 .hackathon
+.env
+__pycache__
+*.pyc
+*.pyo
+.git
+.gitignore
+docker-compose*.yml
+Dockerfile*
+README.md

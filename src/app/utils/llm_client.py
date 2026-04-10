@@ -4,10 +4,6 @@ import boto3
 from botocore.config import Config
 from dotenv import load_dotenv
 
-load_dotenv()
-
-INFERENCE_PROFILE_ARN = os.environ["INFERENCE_PROFILE_ARN"]
-REGION = INFERENCE_PROFILE_ARN.split(":")[3]
 BEDROCK_CONFIG = Config(
     connect_timeout=8,
     read_timeout=55,
@@ -49,7 +45,17 @@ def get_response(messages: list[dict], system: str = "") -> str:
     Returns:
         Texto de respuesta del modelo.
     """
-    client = boto3.client("bedrock-runtime", region_name=REGION, config=BEDROCK_CONFIG)
+    load_dotenv(override=True)
+    INFERENCE_PROFILE_ARN = os.environ["INFERENCE_PROFILE_ARN"]
+    REGION = INFERENCE_PROFILE_ARN.split(":")[3]
+    client = boto3.client(
+        "bedrock-runtime",
+        region_name=REGION,
+        aws_access_key_id=os.environ["aws_access_key_id"],
+        aws_secret_access_key=os.environ["aws_secret_access_key"],
+        aws_session_token=os.environ.get("aws_session_token"),
+        config=BEDROCK_CONFIG,
+    )
 
     body = json.dumps({
         "anthropic_version": "bedrock-2023-05-31",

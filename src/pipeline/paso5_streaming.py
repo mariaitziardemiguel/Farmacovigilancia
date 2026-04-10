@@ -12,11 +12,6 @@ from botocore.config import Config
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 
-load_dotenv()
-
-INFERENCE_PROFILE_ARN = os.environ["INFERENCE_PROFILE_ARN"]
-MODEL_HAIKU = INFERENCE_PROFILE_ARN
-REGION      = INFERENCE_PROFILE_ARN.split(":")[3]
 
 BEDROCK_CONFIG = Config(
     connect_timeout=10,
@@ -42,7 +37,18 @@ def _raw(valor) -> str:
 
 
 def _llamar_llm(system: str, user: str, max_tokens: int = 1024, label: str = "") -> str:
-    client = boto3.client("bedrock-runtime", region_name=REGION, config=BEDROCK_CONFIG)
+    load_dotenv(override=True)
+    INFERENCE_PROFILE_ARN = os.environ["INFERENCE_PROFILE_ARN"]
+    MODEL_HAIKU = INFERENCE_PROFILE_ARN
+    REGION = INFERENCE_PROFILE_ARN.split(":")[3]
+    client = boto3.client(
+        "bedrock-runtime",
+        region_name=REGION,
+        aws_access_key_id=os.environ["aws_access_key_id"],
+        aws_secret_access_key=os.environ["aws_secret_access_key"],
+        aws_session_token=os.environ.get("aws_session_token"),
+        config=BEDROCK_CONFIG,
+    )
     body = json.dumps({
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": max_tokens,
