@@ -588,6 +588,164 @@ async def generate_manual(
     return StreamingResponse(stream(), media_type="text/event-stream")
 
 
+@app.post("/generate_interacciones")
+async def generate_interacciones(
+    farmacos_json:  str = Form(...),        # JSON array of {inn, name_es}
+    cod_dedra:      str = Form(...),
+    ram_en:         str = Form(default=""),
+    ram_es:         str = Form(default=""),
+    llts_en_json:   str = Form(default="[]"),
+    edad:           str = Form(default=""),
+    sexo:           str = Form(default=""),
+    etnia:          str = Form(default=""),
+):
+    from pipeline.paso4_evidencia import (
+        buscar_openfda, buscar_pubmed, buscar_prac,
+        buscar_drugbank, buscar_pharmgkb, buscar_reactome, buscar_cima,
+        buscar_cima_seccion45, buscar_drugbank_interacciones, buscar_pubmed_interacciones,
+    )
+
+    try:
+        farmacos = _json.loads(farmacos_json)
+        if not isinstance(farmacos, list) or len(farmacos) < 2:
+            raise HTTPException(status_code=400, detail="Se necesitan al menos 2 fármacos")
+    except _json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="farmacos_json inválido")
+
+    try:
+        llts_en = _json.loads(llts_en_json or "[]")
+        if not isinstance(llts_en, list):
+            llts_en = []
+        llts_en = [str(x).strip() for x in llts_en if str(x).strip()]
+    except Exception:
+        llts_en = []
+
+    farmacos_inn = [f["inn"] for f in farmacos]
+
+    def event(tipo: str, payload: dict) -> str:
+        return f"data: {_json.dumps({'tipo': tipo, **payload}, ensure_ascii=False)}\n\n"
+
+    async def stream():
+        loop = asyncio.get_event_loop()
+        SOURCE_TIMEOUT = 45
+
+        yield event("progreso", {"mensaje": f"Iniciando análisis: {', '.join(farmacos_inn)}"})
+        yield event("cabecera_int", {
+            "farmacos":  farmacos,
+            "ram":       ram_es or ram_en or cod_dedra,
+            "ram_en":    ram_en,
+            "cod_dedra": cod_dedra,
+        })
+
+        # ── Por cada fármaco: pipeline individual (sin LLM) ─────────────────
+        for idx, farmaco in enumerate(farmacos):
+            inn     = farmaco["inn"]
+            name_es = farmaco.get("name_es", inn)
+
+            yield event("progreso", {"mensaje": f"Fármaco {idx+1}/{len(farmacos)}: {name_es} ({inn})"})
+
+            source_defs = [
+                ("CIMA",      buscar_cima,     (name_es, inn, ram_es or ram_en, False)),
+                ("DrugBank",  buscar_drugbank, (inn, True)),
+                ("PharmGKB",  buscar_pharmgkb, (inn, True)),
+                ("Reactome",  buscar_reactome, (inn, True)),
+                ("FDA FAERS", buscar_openfda,  (inn, ram_en, cod_dedra, True, llts_en)),
+                ("PubMed",    buscar_pubmed,   (inn, ram_en, sexo, etnia, edad, cod_dedra, True, llts_en)),
+                ("PRAC/EMA",  buscar_prac,     (inn, ram_en, cod_dedra, True, llts_en, False)),
+            ]
+
+            task_to_name = {}
+            for src_name, fn, args in source_defs:
+                fut  = loop.run_in_executor(None, fn, *args)
+                task = asyncio.ensure_future(asyncio.wait_for(fut, timeout=SOURCE_TIMEOUT))
+                task_to_name[task] = src_name
+
+            remaining = set(task_to_name.keys())
+            while remaining:
+                done, remaining = await asyncio.wait(remaining, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    src_name = task_to_name[task]
+                    try:
+                        texto, ref_data = task.result()
+                        seccion = _fuente_a_seccion(src_name, texto, ref_data)
+                        if seccion:
+                            seccion["farmaco_idx"] = idx
+                            seccion["farmaco_inn"] = inn
+                            yield event("seccion_farmaco", seccion)
+                        yield event("progreso", {"mensaje": f"  ✓ {src_name} ({name_es})"})
+                    except asyncio.TimeoutError:
+                        yield event("progreso", {"mensaje": f"  ⏱ {src_name} ({name_es}) — timeout"})
+                    except Exception as exc:
+                        yield event("progreso", {"mensaje": f"  ✗ {src_name} ({name_es}) — {str(exc)[:60]}"})
+
+        # ── Búsquedas específicas de interacción ────────────────────────────
+        yield event("progreso", {"mensaje": "Buscando interacciones entre fármacos..."})
+
+        # CIMA 4.5 para cada fármaco
+        for idx, farmaco in enumerate(farmacos):
+            inn     = farmaco["inn"]
+            name_es = farmaco.get("name_es", inn)
+            try:
+                fut = loop.run_in_executor(None, buscar_cima_seccion45, name_es, inn)
+                texto, refs = await asyncio.wait_for(fut, timeout=SOURCE_TIMEOUT)
+                ft_url = refs[0].get("ft_url", "") if refs else ""
+                yield event("seccion_interaccion", {
+                    "id":          f"cima45_{idx}",
+                    "titulo":      f"CIMA 4.5 — {name_es}",
+                    "estado":      "ok",
+                    "contenido":   {"texto": texto, "ft_url": ft_url},
+                    "fuentes":     ["CIMA"],
+                    "subtipo":     "cima45",
+                    "farmaco_idx": idx,
+                    "farmaco_inn": inn,
+                })
+                yield event("progreso", {"mensaje": f"  ✓ CIMA 4.5 ({name_es})"})
+            except asyncio.TimeoutError:
+                yield event("progreso", {"mensaje": f"  ⏱ CIMA 4.5 ({name_es}) — timeout"})
+            except Exception as exc:
+                yield event("progreso", {"mensaje": f"  ✗ CIMA 4.5 ({name_es}) — {str(exc)[:60]}"})
+
+        # DrugBank interacciones
+        try:
+            fut = loop.run_in_executor(None, buscar_drugbank_interacciones, farmacos_inn)
+            resultado, _ = await asyncio.wait_for(fut, timeout=SOURCE_TIMEOUT)
+            yield event("seccion_interaccion", {
+                "id":        "drugbank_int",
+                "titulo":    "DrugBank — Interacciones",
+                "estado":    "ok",
+                "contenido": resultado,
+                "fuentes":   ["DrugBank"],
+                "subtipo":   "drugbank_int",
+            })
+            yield event("progreso", {"mensaje": "  ✓ DrugBank interacciones"})
+        except asyncio.TimeoutError:
+            yield event("progreso", {"mensaje": "  ⏱ DrugBank interacciones — timeout"})
+        except Exception as exc:
+            yield event("progreso", {"mensaje": f"  ✗ DrugBank interacciones — {str(exc)[:60]}"})
+
+        # PubMed interacciones combinadas
+        try:
+            fut = loop.run_in_executor(None, buscar_pubmed_interacciones, farmacos_inn, ram_en, llts_en)
+            resultado, _ = await asyncio.wait_for(fut, timeout=SOURCE_TIMEOUT)
+            yield event("seccion_interaccion", {
+                "id":        "pubmed_int",
+                "titulo":    "PubMed — Combinaciones de Fármacos",
+                "estado":    "ok",
+                "contenido": resultado,
+                "fuentes":   ["PubMed"],
+                "subtipo":   "pubmed_int",
+            })
+            yield event("progreso", {"mensaje": "  ✓ PubMed interacciones"})
+        except asyncio.TimeoutError:
+            yield event("progreso", {"mensaje": "  ⏱ PubMed interacciones — timeout"})
+        except Exception as exc:
+            yield event("progreso", {"mensaje": f"  ✗ PubMed interacciones — {str(exc)[:60]}"})
+
+        yield event("fin_int", {"mensaje": "Análisis de interacciones completado"})
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
 @app.post("/chat")
 async def chat(
     message: str = Form(...),

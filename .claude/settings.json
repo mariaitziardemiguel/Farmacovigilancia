@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import json; d=json.load\\(open\\('c:/Users/maria/Desktop/cuarto2/Practicas curriculares/Farmacovigilancia/data/drugbank/drugbank_interactions.json', encoding='utf-8'\\)\\); keys=list\\(d.keys\\(\\)\\)[:3]; print\\('Keys sample:', keys\\); print\\('First entry:', json.dumps\\(d[keys[0]], ensure_ascii=False\\)[:800]\\)\")",
+      "Bash(python -c ':*)"
+    ]
+  }
+}

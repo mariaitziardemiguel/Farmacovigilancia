@@ -457,7 +457,7 @@ def buscar_pubmed(farmaco: str, reaccion: str, sexo: str, raza: str, edad: str, 
 # 4. PRAC / EMA
 # ─────────────────────────────────────────────
 
-def buscar_prac(farmaco: str, reaccion: str, cod_dedra: str = None, farmaco_ya_inn: bool = False, llts_en: list[str] | None = None) -> tuple:
+def buscar_prac(farmaco: str, reaccion: str, cod_dedra: str = None, farmaco_ya_inn: bool = False, llts_en: list[str] | None = None, usar_llm: bool = True) -> tuple:
     """
     Busca en prac_signals.json por INN del fármaco.
     Para cada sección 4 que lo mencione, indica si la RAM (PT o LLTs) también aparece.
@@ -553,7 +553,7 @@ Responde SOLO con este JSON (sin markdown):
     # Llamadas LLM en paralelo solo para subsecciones sin match directo.
     from concurrent.futures import ThreadPoolExecutor, as_completed
     resultados_llm = []
-    if tareas_llm:
+    if tareas_llm and usar_llm:
         with ThreadPoolExecutor(max_workers=6) as executor:
             futuros = {executor.submit(_evaluar_subseccion, t): t for t in tareas_llm}
             for futuro in as_completed(futuros):
@@ -561,6 +561,8 @@ Responde SOLO con este JSON (sin markdown):
                     resultados_llm.append(futuro.result())
                 except Exception as e:
                     print(f"    [PRAC] Error LLM subsección: {e}")
+    elif tareas_llm and not usar_llm:
+        print(f"    [PRAC] {len(tareas_llm)} subsecciones sin match directo omitidas (LLM desactivado)")
 
     # Agrupar por documento y construir output
     from collections import defaultdict
@@ -906,6 +908,7 @@ def buscar_cima(
     farmaco_nombre: str,
     farmaco_inn: str | None = None,
     reaccion: str = "",
+    usar_llm: bool = True,
 ) -> tuple:
     """
     Busca la ficha técnica en CIMA.
@@ -976,6 +979,10 @@ def buscar_cima(
                 print(f"    [CIMA] RAM '{reaccion}' encontrada por regex directa")
                 if fragmento:
                     print(f"    [CIMA] Fragmento detectado: {fragmento[:240]}")
+            elif not usar_llm:
+                # Sin LLM: si no hay match regex se informa pero se devuelve el texto extraído
+                print(f"    [CIMA] Sin match directo para '{reaccion}' (LLM desactivado)")
+                texto_ft = f"La RAM '{reaccion}' no se encontró por regex en la ficha técnica de CIMA."
             else:
                 print(f"    [CIMA] Sin match directo por regex para '{reaccion}'. Fallback LLM...")
                 prompt_cima = f"""Ficha técnica (CIMA/AEMPS):
@@ -1014,6 +1021,164 @@ Responde SOLO con este JSON (sin markdown):
         print(f"    ❌ Error CIMA: {e}")
         print("="*60 + "\n")
         return f"Error al consultar CIMA: {str(e)[:120]}", []
+
+
+# ─────────────────────────────────────────────
+# 9. CIMA – Sección 4.5 (interacciones)
+# ─────────────────────────────────────────────
+
+_PATRON_45 = re.compile(
+    r"4\.5\.?\s*Interacci[oó]n con otros medicamentos y otras formas de interacci[oó]n"
+    r"[\s\S]*?(?=4\.6\.?\s*Fertilidad)",
+    re.IGNORECASE,
+)
+
+
+def buscar_cima_seccion45(farmaco_nombre: str, farmaco_inn: str | None = None) -> tuple:
+    """
+    Extrae la sección 4.5 (interacciones) de la ficha técnica CIMA.
+    No realiza ninguna llamada a LLM.
+    Devuelve (texto_seccion45, [{"ft_url": ..., "nombre_oficial": ...}]).
+    """
+    print(f"\n  [CIMA 4.5] Extrayendo sección 4.5 para '{farmaco_nombre}'")
+    try:
+        resp = requests.get(
+            _CIMA_URL,
+            params={"nombre": farmaco_nombre.strip(), "comerc": "1", "autorizados": "1"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("resultados"):
+            return f"Sin resultados en CIMA para '{farmaco_nombre}'.", []
+        med = data["resultados"][0]
+        nombre_oficial = med.get("nombre", farmaco_nombre)
+        docs = med.get("docs", [])
+        if not docs:
+            return "Ficha técnica no disponible en CIMA.", []
+        ft_url = docs[0].get("url", "")
+        pdf_resp = requests.get(ft_url, timeout=30)
+        pdf_resp.raise_for_status()
+        with pdfplumber.open(io.BytesIO(pdf_resp.content)) as pdf:
+            texto_completo = " ".join(page.extract_text() or "" for page in pdf.pages)
+        texto_completo = re.sub(r"\r?\n+", " ", texto_completo)
+        texto_completo = re.sub(r"\s{2,}", " ", texto_completo).strip()
+        m = _PATRON_45.search(texto_completo)
+        if m:
+            print(f"      ✓ Sección 4.5 encontrada ({len(m.group(0))} chars)")
+            return m.group(0).strip(), [{"ft_url": ft_url, "nombre_oficial": nombre_oficial}]
+        return (
+            f"Sección 4.5 no encontrada en la ficha técnica de '{farmaco_nombre}'.",
+            [{"ft_url": ft_url, "nombre_oficial": nombre_oficial}],
+        )
+    except Exception as e:
+        print(f"      ❌ Error CIMA 4.5: {e}")
+        return f"Error al consultar CIMA (sección 4.5): {str(e)[:120]}", []
+
+
+# ─────────────────────────────────────────────
+# 10. DrugBank – Interacciones fármaco-fármaco
+# ─────────────────────────────────────────────
+
+def buscar_drugbank_interacciones(farmacos_inn: list) -> tuple:
+    """
+    Interacciones DrugBank para una lista de fármacos.
+    Devuelve:
+      - interacciones_por_farmaco: todas las conocidas de cada fármaco (hasta 50)
+      - interacciones_directas: solo entre los fármacos de la lista
+    Sin llamadas a LLM.
+    """
+    print(f"\n  [DrugBank Int] Buscando interacciones para: {farmacos_inn}")
+    resultado = {
+        "interacciones_por_farmaco": {},
+        "interacciones_directas": [],
+    }
+
+    for inn in farmacos_inn:
+        ints = drugbank.get_interactions(inn)
+        resultado["interacciones_por_farmaco"][inn] = ints
+        print(f"      {inn}: {len(ints)} interacciones")
+
+    # Interacciones directas entre los fármacos introducidos
+    inn_lower = {inn.lower(): inn for inn in farmacos_inn}
+    seen_pairs: set = set()
+    for inn1 in farmacos_inn:
+        for inter in resultado["interacciones_por_farmaco"].get(inn1, []):
+            name_lower = inter.get("name", "").lower()
+            if name_lower in inn_lower and inn_lower[name_lower] != inn1:
+                inn2 = inn_lower[name_lower]
+                pair = frozenset([inn1, inn2])
+                if pair not in seen_pairs:
+                    seen_pairs.add(pair)
+                    resultado["interacciones_directas"].append({
+                        "farmaco1": inn1,
+                        "farmaco2": inn2,
+                        "description": inter.get("description", ""),
+                    })
+
+    directas = resultado["interacciones_directas"]
+    print(f"      Interacciones directas entre los fármacos: {len(directas)}")
+    refs = [{"farmaco": inn} for inn in farmacos_inn]
+    return resultado, refs
+
+
+# ─────────────────────────────────────────────
+# 11. PubMed – Combinaciones AND de fármacos
+# ─────────────────────────────────────────────
+
+def buscar_pubmed_interacciones(
+    farmacos_inn: list,
+    ram_en: str,
+    llts_en: list | None = None,
+) -> tuple:
+    """
+    Búsquedas PubMed con combinaciones AND de los fármacos + RAM:
+      - Búsqueda 1: TODOS los fármacos AND (+ RAM)
+      - Búsquedas 2..N: cada combinación de N-1 fármacos, excluyendo uno cada vez
+    Sin llamadas a LLM.
+    """
+    print(f"\n  [PubMed Int] Búsquedas combinadas: {farmacos_inn}")
+    llts = [str(x).strip() for x in (llts_en or []) if str(x).strip()]
+    terminos_ram = [ram_en] + [l for l in llts if l.lower() != ram_en.lower()]
+    ram_query = " OR ".join(f'"{t}"' for t in terminos_ram) if terminos_ram else ""
+
+    n = len(farmacos_inn)
+    # Build combinations: full AND + each N-1 subset (one drug excluded each time)
+    combos = [farmacos_inn[:]]  # full combination
+    if n > 2:
+        for i in range(n):
+            combo = [f for j, f in enumerate(farmacos_inn) if j != i]
+            combos.append(combo)
+
+    resultados_combinaciones = []
+    all_pmids: set = set()
+
+    for combo in combos:
+        drug_query = " AND ".join(f'"{inn}"' for inn in combo)
+        query = f"({drug_query}) AND ({ram_query})" if ram_query else drug_query
+        label = " AND ".join(combo)
+
+        ids, total, qt = _pubmed_esearch(query, 3)
+        articulos = _pubmed_efetch(ids) if ids else []
+        all_pmids.update(ids)
+
+        print(f"      [{label}]: {total} resultados, {len(articulos)} descargados")
+        resultados_combinaciones.append({
+            "label":        label,
+            "farmacos":     combo,
+            "query":        query,
+            "n_encontrados": int(total),
+            "articulos":    articulos,
+            "urls":         [f"https://pubmed.ncbi.nlm.nih.gov/{p}/" for p in ids],
+        })
+
+    resultado = {
+        "combinaciones":  resultados_combinaciones,
+        "farmacos":       farmacos_inn,
+        "ram":            ram_en,
+    }
+    refs = [{"pmid": p, "url": f"https://pubmed.ncbi.nlm.nih.gov/{p}/"} for p in all_pmids]
+    return resultado, refs
 
 
 # ─────────────────────────────────────────────
