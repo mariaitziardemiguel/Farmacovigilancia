@@ -1,4 +1,5 @@
 .venv
+.claude
 .hackathon
 .env
 __pycache__

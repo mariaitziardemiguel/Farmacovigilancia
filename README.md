@@ -44,11 +44,6 @@ aws_session_token=...
 docker compose up --build
 ```
 
-**Desarrollo** (hot-reload + credenciales desde `~/.aws`):
-```bash
-docker compose -f docker-compose-dev.yml up --build
-```
-
 La app queda disponible en `http://localhost:8000`.
 
 > Las credenciales AWS temporales caducan cada pocas horas. Actualiza el `.env` y ejecuta `docker compose restart` para aplicar las nuevas sin reconstruir la imagen.
@@ -72,7 +67,7 @@ src/
   pipeline/terminology.py       # MedDRA y RxNorm
 data/
   MedDRA v28.1/                 # Terminología local
-  drugbank/                     # Perfiles farmacológicos
+  drugbank/                     # Perfilesfarmacológicos
   prac_signals.json             # Actas PRAC procesadas
 scripts/                        # Tests de integración por APIs
 ```

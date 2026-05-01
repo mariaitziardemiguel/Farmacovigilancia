@@ -1,8 +1,32 @@
+# Entorno y configuración local
 .venv/
+.claude/
 *.env
 .env*
+
+# Python
 __pycache__/
 *.pyc
 *.pyo
-data/
-hackathon/
+
+# Datos — NO subir a GitHub
+data/EMA PRAC/
+data/FINAL/
+data/MedDRA v28.1/
+data/drugbank/
+data/informes/
+data/__MACOSX/
+data/prac_signals.json
+data/REPTE08_demo.csv.csv
+data/documento_nhc_meddra_pseudo 1.xlsx
+
+# Archivos temporales Word
+~$*.docx
+~$*.xlsx
+~$*.pptx
+
+# Archivo histórico (exploración y hackathon)
+_archivo/
+
+# Informe Word generado
+Informe_Herramienta_Farmacovigilancia.docx

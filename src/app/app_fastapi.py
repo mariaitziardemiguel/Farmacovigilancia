@@ -48,13 +48,12 @@ def _build_chat_system(datos: dict, evidencia: dict) -> str:
     if datos.get("Edad"):       lines.append(f"Edad: {datos['Edad']} años")
     if datos.get("sex_id"):     lines.append(f"Sexo: {datos['sex_id']}")
     if datos.get("natio_dic_id"): lines.append(f"Etnia: {datos['natio_dic_id']}")
-    if datos.get("narrativa"):  lines.append(f"Narrativa clínica: {datos['narrativa']}")
 
     sources = [
         ("CIMA",      "CIMA — Ficha Técnica AEMPS"),
         ("FDA FAERS", "FDA FAERS — Notificaciones espontáneas"),
         ("PubMed",    "PubMed — Literatura científica"),
-        ("Reactome",  "Reactome — Pathways biológicos"),
+        ("PathwayCommons", "Pathway Commons — Interacciones gen-fármaco"),
         ("PharmGKB",  "PharmGKB+CPIC — Farmacogenética"),
         ("DrugBank",  "DrugBank — Perfil farmacológico"),
         ("PRAC/EMA",  "PRAC/EMA — Actas de señales"),
@@ -347,7 +346,7 @@ def _fuente_a_seccion(nombre: str, resultado, ref_data) -> dict | None:
         "PharmGKB":  {"id": "pharmgkb_raw","titulo": "PharmGKB+CPIC - Farmacogenetica",   "fuentes": ["PharmGKB", "CPIC"]},
         "PubMed":    {"id": "pubmed_raw",  "titulo": "PubMed - Literatura Cientifica",     "fuentes": ["PubMed"]},
         "PRAC/EMA":  {"id": "prac_raw",     "titulo": "PRAC/EMA - Actas de Señales",        "fuentes": ["PRAC/EMA"]},
-        "Reactome":  {"id": "reactome_raw","titulo": "Reactome - Pathways Biológicos",      "fuentes": ["Reactome"]},
+        "PathwayCommons": {"id": "pathway_commons_raw", "titulo": "Pathway Commons - Interacciones gen-fármaco", "fuentes": ["PathwayCommons"]},
     }
     cfg = source_cfg.get(nombre)
     if not cfg:
@@ -367,11 +366,26 @@ def _fuente_a_seccion(nombre: str, resultado, ref_data) -> dict | None:
     if search_details:
         contenido["search_details"] = search_details
     if nombre == "CIMA" and isinstance(ref_data, list) and ref_data:
-        contenido["ft_url"] = ref_data[0].get("ft_url", "")
+        contenido["ft_url"]          = ref_data[0].get("ft_url", "")
+        contenido["nombre_oficial"]  = ref_data[0].get("nombre_oficial", "")
+        contenido["ram_encontrada"]  = ref_data[0].get("ram_encontrada", True)
+        contenido["ram"]             = ref_data[0].get("ram", "")
     if nombre == "FDA FAERS" and isinstance(ref_data, dict):
         contenido["fda_refs"] = ref_data
-    if nombre == "Reactome" and isinstance(ref_data, list):
-        contenido["pathways"] = ref_data
+    if nombre == "PathwayCommons" and isinstance(ref_data, list):
+        contenido["pathway_commons_refs"] = ref_data
+    if nombre == "PRAC/EMA":
+        # Los refs ya llevan fragmentos y ram_encontrada directamente desde buscar_prac
+        contenido["prac_docs"] = [
+            {
+                "source":        r.get("source", ""),
+                "date":          r.get("date", ""),
+                "filename":      r.get("filename", ""),
+                "fragmentos":    r.get("fragmentos", []),
+                "ram_encontrada": r.get("ram_encontrada", False),
+            }
+            for r in (ref_data if isinstance(ref_data, list) else [])
+        ]
     if nombre == "PharmGKB" and isinstance(resultado, dict):
         contenido["genes_data"] = resultado.get("farmacogenetica", {})
     if nombre == "PubMed" and isinstance(resultado, dict):
@@ -411,14 +425,14 @@ async def generate_manual(
     edad:      str = Form(default=""),
     sexo:      str = Form(default=""),
     etnia:     str = Form(default=""),
-    narrativa: str = Form(default=""),
+
 ):
     from pipeline.paso4_evidencia import (
         buscar_openfda, buscar_pubmed,
-        buscar_prac, buscar_drugbank, buscar_pharmgkb, buscar_reactome,
+        buscar_prac, buscar_drugbank, buscar_pharmgkb, buscar_pathway_commons,
         buscar_cima,
     )
-    from pipeline.paso5_streaming import generar_secciones
+    from pipeline.paso5_streaming import generar_secciones, generar_informe_interacciones
 
     farmaco_inn = farmaco_inn.strip()
     farmaco_es = (farmaco_es or farmaco).strip()
@@ -454,7 +468,6 @@ async def generate_manual(
         "Edad":            edad,
         "sex_id":          sexo,
         "natio_dic_id":    etnia,
-        "narrativa":       narrativa,
     }
 
     def event(tipo: str, payload: dict) -> str:
@@ -483,7 +496,7 @@ async def generate_manual(
             ("CIMA",       buscar_cima,      (farmaco_es, farmaco_inn, ram_es or ram_en)),
             ("DrugBank",   buscar_drugbank,  (farmaco_inn, True)),
             ("PharmGKB",   buscar_pharmgkb,  (farmaco_inn, True)),
-            ("Reactome",   buscar_reactome,  (farmaco_inn, True)),
+            ("PathwayCommons", buscar_pathway_commons, (farmaco_inn, True)),
             ("FDA FAERS",  buscar_openfda,   (farmaco_inn, ram_en, cod_dedra, True, llts_en)),
             ("PubMed",     buscar_pubmed,    (farmaco_inn, ram_en, sexo, etnia, edad, cod_dedra, True, llts_en)),
             ("PRAC/EMA",   buscar_prac,      (farmaco_inn, ram_en, cod_dedra, True, llts_en)),
@@ -548,7 +561,7 @@ async def generate_manual(
         yield event("referencias", {
             "ft_url":   ft_url_out,
             "pubmed":   refs_dict.get("PubMed", []),
-            "reactome": refs_dict.get("Reactome", []),
+            "pathway_commons": refs_dict.get("PathwayCommons", []),
             "fda":      refs_dict.get("FDA FAERS", {}),
             "prac":     refs_dict.get("PRAC/EMA", []),
         })
@@ -601,9 +614,10 @@ async def generate_interacciones(
 ):
     from pipeline.paso4_evidencia import (
         buscar_openfda, buscar_pubmed, buscar_prac,
-        buscar_drugbank, buscar_pharmgkb, buscar_reactome, buscar_cima,
+        buscar_drugbank, buscar_pharmgkb, buscar_pathway_commons, buscar_cima,
         buscar_cima_seccion45, buscar_drugbank_interacciones, buscar_pubmed_interacciones,
     )
+    from pipeline.paso5_streaming import generar_informe_interacciones
 
     try:
         farmacos = _json.loads(farmacos_json)
@@ -648,7 +662,7 @@ async def generate_interacciones(
                 ("CIMA",      buscar_cima,     (name_es, inn, ram_es or ram_en, False)),
                 ("DrugBank",  buscar_drugbank, (inn, True)),
                 ("PharmGKB",  buscar_pharmgkb, (inn, True)),
-                ("Reactome",  buscar_reactome, (inn, True)),
+                ("PathwayCommons", buscar_pathway_commons, (inn, True)),
                 ("FDA FAERS", buscar_openfda,  (inn, ram_en, cod_dedra, True, llts_en)),
                 ("PubMed",    buscar_pubmed,   (inn, ram_en, sexo, etnia, edad, cod_dedra, True, llts_en)),
                 ("PRAC/EMA",  buscar_prac,     (inn, ram_en, cod_dedra, True, llts_en, False)),
@@ -681,7 +695,8 @@ async def generate_interacciones(
         # ── Búsquedas específicas de interacción ────────────────────────────
         yield event("progreso", {"mensaje": "Buscando interacciones entre fármacos..."})
 
-        # CIMA 4.5 para cada fármaco
+        # CIMA 4.5 — recoger todos los fármacos y emitir UN evento combinado
+        cima_farmacos = []
         for idx, farmaco in enumerate(farmacos):
             inn     = farmaco["inn"]
             name_es = farmaco.get("name_es", inn)
@@ -689,31 +704,56 @@ async def generate_interacciones(
                 fut = loop.run_in_executor(None, buscar_cima_seccion45, name_es, inn)
                 texto, refs = await asyncio.wait_for(fut, timeout=SOURCE_TIMEOUT)
                 ft_url = refs[0].get("ft_url", "") if refs else ""
-                yield event("seccion_interaccion", {
-                    "id":          f"cima45_{idx}",
-                    "titulo":      f"CIMA 4.5 — {name_es}",
-                    "estado":      "ok",
-                    "contenido":   {"texto": texto, "ft_url": ft_url},
-                    "fuentes":     ["CIMA"],
-                    "subtipo":     "cima45",
-                    "farmaco_idx": idx,
-                    "farmaco_inn": inn,
-                })
+                cima_farmacos.append({"inn": inn, "name_es": name_es, "ft_url": ft_url, "texto": texto})
                 yield event("progreso", {"mensaje": f"  ✓ CIMA 4.5 ({name_es})"})
             except asyncio.TimeoutError:
+                cima_farmacos.append({"inn": inn, "name_es": name_es, "ft_url": "", "texto": "Timeout al consultar CIMA."})
                 yield event("progreso", {"mensaje": f"  ⏱ CIMA 4.5 ({name_es}) — timeout"})
             except Exception as exc:
+                cima_farmacos.append({"inn": inn, "name_es": name_es, "ft_url": "", "texto": f"Error: {str(exc)[:120]}"})
                 yield event("progreso", {"mensaje": f"  ✗ CIMA 4.5 ({name_es}) — {str(exc)[:60]}"})
 
+        # Detectar menciones cruzadas: ¿menciona la 4.5 de A al fármaco B?
+        menciones_cruzadas = []
+        for i, fa in enumerate(cima_farmacos):
+            for j, fb in enumerate(cima_farmacos):
+                if i == j:
+                    continue
+                texto_a = fa["texto"].lower()
+                terminos_b = {fb["inn"].lower(), fb["name_es"].lower()}
+                for term in terminos_b:
+                    if len(term) >= 4 and term in texto_a:
+                        # Extraer fragmento de contexto (~200 chars alrededor)
+                        pos = texto_a.find(term)
+                        start = max(0, pos - 80)
+                        end   = min(len(fa["texto"]), pos + len(term) + 120)
+                        fragmento = ("…" if start > 0 else "") + fa["texto"][start:end].strip() + ("…" if end < len(fa["texto"]) else "")
+                        menciones_cruzadas.append({
+                            "farmaco_origen":   fa["name_es"],
+                            "farmaco_mencionado": fb["name_es"],
+                            "fragmento":        fragmento,
+                        })
+                        break  # una mención por par es suficiente
+
+        yield event("seccion_interaccion", {
+            "id":       "cima_int",
+            "titulo":   "CIMA 4.5 — Interacciones",
+            "estado":   "ok",
+            "contenido": {"farmacos": cima_farmacos, "menciones_cruzadas": menciones_cruzadas},
+            "fuentes":  ["CIMA"],
+            "subtipo":  "cima_int",
+        })
+
         # DrugBank interacciones
+        drugbank_int_data = {}
         try:
             fut = loop.run_in_executor(None, buscar_drugbank_interacciones, farmacos_inn)
-            resultado, _ = await asyncio.wait_for(fut, timeout=SOURCE_TIMEOUT)
+            drugbank_int_data, _ = await asyncio.wait_for(fut, timeout=SOURCE_TIMEOUT)
             yield event("seccion_interaccion", {
                 "id":        "drugbank_int",
                 "titulo":    "DrugBank — Interacciones",
                 "estado":    "ok",
-                "contenido": resultado,
+                "contenido": drugbank_int_data,
                 "fuentes":   ["DrugBank"],
                 "subtipo":   "drugbank_int",
             })
@@ -724,14 +764,15 @@ async def generate_interacciones(
             yield event("progreso", {"mensaje": f"  ✗ DrugBank interacciones — {str(exc)[:60]}"})
 
         # PubMed interacciones combinadas
+        pubmed_int_data = {}
         try:
             fut = loop.run_in_executor(None, buscar_pubmed_interacciones, farmacos_inn, ram_en, llts_en)
-            resultado, _ = await asyncio.wait_for(fut, timeout=SOURCE_TIMEOUT)
+            pubmed_int_data, _ = await asyncio.wait_for(fut, timeout=SOURCE_TIMEOUT)
             yield event("seccion_interaccion", {
                 "id":        "pubmed_int",
                 "titulo":    "PubMed — Combinaciones de Fármacos",
                 "estado":    "ok",
-                "contenido": resultado,
+                "contenido": pubmed_int_data,
                 "fuentes":   ["PubMed"],
                 "subtipo":   "pubmed_int",
             })
@@ -740,6 +781,27 @@ async def generate_interacciones(
             yield event("progreso", {"mensaje": "  ⏱ PubMed interacciones — timeout"})
         except Exception as exc:
             yield event("progreso", {"mensaje": f"  ✗ PubMed interacciones — {str(exc)[:60]}"})
+
+        # Informe de interacción con LLM
+        yield event("progreso", {"mensaje": "Generando informe de interacción con IA..."})
+        try:
+            evidencia_int = {
+                "cima_45":           cima_farmacos,
+                "menciones_cruzadas": menciones_cruzadas,
+                "drugbank":          drugbank_int_data,
+                "pubmed":            pubmed_int_data,
+            }
+            informe = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, generar_informe_interacciones,
+                    farmacos, ram_es or ram_en, evidencia_int,
+                ),
+                timeout=300,
+            )
+            yield event("informe_int", {"contenido": informe})
+            yield event("progreso", {"mensaje": "  ✓ Informe de interacción generado"})
+        except Exception as exc:
+            yield event("progreso", {"mensaje": f"  ✗ Informe interacción — {str(exc)[:80]}"})
 
         yield event("fin_int", {"mensaje": "Análisis de interacciones completado"})
 

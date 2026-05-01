@@ -275,7 +275,7 @@
     #card-pharmgkb_raw { border-left-color: #ec4899; background: color-mix(in srgb, var(--surface) 96%, #ec4899 4%); }
     #card-pubmed_raw   { border-left-color: #34d399; background: color-mix(in srgb, var(--surface) 96%, #34d399 4%); }
     #card-prac_raw     { border-left-color: #fbbf24; background: color-mix(in srgb, var(--surface) 96%, #fbbf24 4%); }
-    #card-reactome_raw { border-left-color: #22d3ee; background: color-mix(in srgb, var(--surface) 96%, #22d3ee 4%); }
+    #card-pathway_commons_raw { border-left-color: #22d3ee; background: color-mix(in srgb, var(--surface) 96%, #22d3ee 4%); }
 
     .card.raw-data .card-loading-text { font-style: italic; color: #8b7496; }
 
@@ -549,6 +549,32 @@
       grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
       gap: 16px;
     }
+
+    /* ── Historial de sesión ── */
+    #nuevo-analisis-btn {
+      width: 100%; padding: 8px 12px; border-radius: 8px;
+      background: var(--accent-dim); border: 1px solid var(--accent);
+      color: var(--accent); font-size: 0.82rem; font-weight: 700;
+      cursor: pointer; transition: background 0.2s, color 0.2s;
+    }
+    #nuevo-analisis-btn:hover { background: var(--accent); color: #fff; }
+    #historial-section { display: flex; flex-direction: column; gap: 6px; }
+    .historial-label {
+      font-size: 0.7rem; font-weight: 700; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .historial-item {
+      padding: 8px 10px; border-radius: 8px; cursor: pointer;
+      background: var(--surface2); border: 1px solid var(--border);
+      transition: border-color 0.2s, background 0.2s;
+      font-size: 0.78rem; line-height: 1.4;
+    }
+    .historial-item:hover { border-color: var(--accent); background: var(--accent-dim); }
+    .historial-item.active { border-color: var(--accent); border-left-width: 3px; }
+    .historial-item .hi-farmaco { font-weight: 700; color: var(--text); }
+    .historial-item .hi-ram { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .historial-item .hi-time { font-size: 0.68rem; color: var(--text-muted); margin-top: 2px; }
+    #historial-vacio { font-size: 0.78rem; color: var(--text-muted); font-style: italic; }
   </style>
 </head>
 <body>
@@ -557,12 +583,21 @@
 <aside>
   <h1>💊 DrugWatch</h1>
   <hr/>
+  <button id="nuevo-analisis-btn" onclick="nuevoAnalisis()">+ Nuevo análisis</button>
+  <hr/>
   <p>Introduce los datos del caso para generar el análisis de farmacovigilancia.</p>
   <hr/>
   <div class="step"><div class="num">1</div><span>Fármaco y código MedDRA</span></div>
-  <div class="step"><div class="num">2</div><span>Datos demográficos del paciente</span></div>
+  <div class="step"><div class="num">2</div><span>Datos demográficos</span></div>
   <div class="step"><div class="num">3</div><span>Pulsa «Generar análisis»</span></div>
   <div class="step"><div class="num">4</div><span>Refina cada sección con el asistente lateral</span></div>
+  <hr/>
+  <div id="historial-section">
+    <div class="historial-label">Historial de sesión</div>
+    <div id="historial-lista">
+      <div id="historial-vacio">Sin análisis anteriores</div>
+    </div>
+  </div>
 </aside>
 
 <!-- Main content -->
@@ -794,7 +829,7 @@
     { id: 'pharmgkb_raw',   titulo: 'PharmGKB' },
     { id: 'pubmed_raw',     titulo: 'PubMed' },
     { id: 'prac_raw',       titulo: 'PRAC/EMA - Actas de Señales' },
-    { id: 'reactome_raw',   titulo: 'Reactome - Pathways Biológicos' },
+    { id: 'pathway_commons_raw', titulo: 'Pathway Commons - Interacciones gen-fármaco' },
   ];
   
   // Array completo para compatibilidad
@@ -804,7 +839,7 @@
     'FDA FAERS':    'src-fda',
     'FDA':          'src-fda',
     'PubMed':       'src-pubmed',
-    'Reactome':     'src-reactome',
+    'PathwayCommons': 'src-reactome',
     'PRAC/EMA':     'src-prac',
     'PRAC':         'src-prac',
     'CIMA':         'src-cima',
@@ -821,6 +856,7 @@
   let chatHistory    = [];
   let chatReady      = false;
   let chatSessionId  = null;
+  let activeGenController = null; // AbortController del stream en curso
   let activePill     = null;
   let meddraResolved  = null;
   let meddraTimer     = null;
@@ -1164,6 +1200,335 @@
     return `<span class="conf-badge ${cls}" title="Nivel de confianza">⬤ ${label}</span>`;
   }
 
+  /* ── Shared raw-section renderer (used by both renderSeccion and buildCardHtml) ── */
+  function buildRawSectionHtml(id, c) {
+    if (id === 'cima_raw') {
+      const ftUrl = c.ft_url || '';
+      const nombre = c.nombre_oficial || '';
+      const texto = c.texto || '';
+      const ramEncontrada = c.ram_encontrada !== false;  // true por defecto si no viene el campo
+      const sinFT = texto.startsWith('Sin resultados en CIMA') || texto.startsWith('Ficha técnica no disponible') || texto.startsWith('Error');
+
+      // Bloque cabecera (estilo DrugBank): nombre + enlace PDF
+      const headerBlock = `<div style="margin-bottom:12px;padding:6px 12px;background:color-mix(in srgb,var(--surface2) 90%,#a78bfa 10%);border-radius:6px;border-left:3px solid #a78bfa;">
+        <b style="font-size:0.82rem;color:#a78bfa;">${nombre || 'CIMA — AEMPS'}</b>
+        ${ftUrl ? `<div style="margin-top:4px;"><a href="${ftUrl}" target="_blank" style="color:#a78bfa;font-size:0.78rem;font-weight:600;">Ver Ficha Técnica PDF →</a></div>` : '<div style="margin-top:2px;font-size:0.75rem;color:var(--text-muted);">Ficha técnica no disponible</div>'}
+      </div>`;
+
+      if (sinFT) {
+        return `${headerBlock}<div style="padding:10px 14px;background:color-mix(in srgb,var(--surface2) 90%,#f87171 10%);border-radius:8px;border-left:3px solid #f87171;">
+          <span style="font-size:0.82rem;">${texto}</span></div>`;
+      }
+
+      // Aviso si la RAM no fue confirmada (pero siempre mostramos las secciones)
+      const avisoSinRam = !ramEncontrada ? `
+        <div style="margin-bottom:10px;padding:8px 14px;background:color-mix(in srgb,var(--surface2) 90%,#f59e0b 10%);border-radius:8px;border-left:3px solid #f59e0b;">
+          <b style="font-size:0.78rem;color:#f59e0b;text-transform:uppercase;letter-spacing:0.05em;">⚠ RAM no confirmada directamente en CIMA</b><br/>
+          <span style="font-size:0.8rem;color:var(--text-muted);">Se muestran las secciones de la ficha técnica para revisión.</span>
+        </div>` : '';
+
+      const CIMA_NOMBRES = {
+        '4.3': '4.3 · Contraindicaciones',
+        '4.4': '4.4 · Advertencias y precauciones especiales',
+        '4.5': '4.5 · Interacción con otros medicamentos',
+        '4.8': '4.8 · Reacciones adversas',
+        '4.9': '4.9 · Sobredosis',
+        '5.1': '5.1 · Propiedades farmacodinámicas',
+        '5.2': '5.2 · Propiedades farmacocinéticas',
+      };
+      const bloques = texto.split('\n\n---\n\n').filter(b => b.trim());
+      let cimaHtml = '';
+      for (const bloque of bloques) {
+        const numM = bloque.match(/^(\d+)\.(\d+)/);
+        const key = numM ? `${numM[1]}.${numM[2]}` : null;
+        const header = key ? (CIMA_NOMBRES[key] || key) : 'Información';
+        const isRAM = key === '4.8';
+        const borderColor = isRAM ? '#a78bfa' : '#7c3aed';
+        const lineas = bloque.trim().split('\n');
+        // Si hay más de una línea y la primera es el número de sección, la saltamos.
+        // Si todo viene en una línea (PDF sin saltos), quitamos solo el prefijo numérico.
+        let contenido;
+        if (lineas.length > 1 && lineas[0].match(/^\d+\.\d+/)) {
+          contenido = lineas.slice(1).join('\n').trim();
+        } else {
+          contenido = bloque.replace(/^\d+\.\d+\.?\s*/, '').trim();
+        }
+        if (!contenido) continue;
+        cimaHtml += `<div style="margin-bottom:8px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid ${borderColor};">
+          <b style="font-size:0.78rem;color:#a78bfa;text-transform:uppercase;display:block;margin-bottom:4px;">${header}</b>
+          <div style="font-size:0.82rem;line-height:1.6;white-space:pre-wrap;">${contenido}</div>
+        </div>`;
+      }
+      return `${headerBlock}${avisoSinRam}<div style="max-height:400px;overflow:auto;">
+          ${cimaHtml || `<span style="color:var(--text-muted);font-size:0.82rem;">Sin secciones encontradas</span>`}
+        </div>`;
+    }
+
+    if (id === 'drugbank_raw') {
+      const texto = c.texto || '';
+      const bloques = texto.split('\n\n').filter(b => b.trim());
+      let dbHtml = '';
+      for (let i = 0; i < bloques.length; i++) {
+        const bloque = bloques[i].trim();
+        if (i === 0) {
+          const lineas = bloque.split('\n');
+          const titulo = lineas[0].replace(/=/g, '').trim();
+          const meta   = lineas.slice(1).join('\n').trim();
+          dbHtml += `<div style="margin-bottom:12px;padding:6px 12px;background:color-mix(in srgb,var(--surface2) 90%,#6366f1 10%);border-radius:6px;border-left:3px solid #6366f1;">
+            <b style="font-size:0.82rem;color:#6366f1;">${titulo}</b>
+            ${meta ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;white-space:pre-wrap;">${meta}</div>` : ''}
+          </div>`;
+        } else {
+          const lineas = bloque.split('\n');
+          const header  = lineas[0].trim().replace(/:$/, '');
+          const content = lineas.slice(1).join('\n').trim();
+          if (!header) continue;
+          dbHtml += `<div style="margin-bottom:8px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #6366f1;">
+            <b style="font-size:0.78rem;color:#6366f1;text-transform:uppercase;display:block;margin-bottom:4px;">${header}</b>
+            ${content ? `<div style="font-size:0.82rem;line-height:1.5;white-space:pre-wrap;">${content}</div>` : ''}
+          </div>`;
+        }
+      }
+      return `<div style="max-height:400px;overflow:auto;">
+        ${dbHtml || `<div style="white-space:pre-wrap;font-size:0.8rem;line-height:1.5;">${texto}</div>`}
+      </div>`;
+    }
+
+    if (id === 'pubmed_raw') {
+      const secciones = c.pubmed_secciones;
+      let pubHtml = '';
+      if (secciones && secciones.length > 0) {
+        const totalDescargados = secciones.reduce((s, sec) => s + (sec.articulos || []).length, 0);
+        pubHtml += `<div style="margin-bottom:12px;padding:6px 12px;background:color-mix(in srgb,var(--surface2) 90%,#34d399 10%);border-radius:6px;border-left:3px solid #34d399;">
+          <span style="font-size:0.78rem;color:#34d399;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Artículos seleccionados: ${totalDescargados}</span>
+        </div>`;
+        for (const sec of secciones) {
+          const arts = sec.articulos || [];
+          const terminoPrincipal = (sec.terminos_busqueda || [])[0] || '';
+          const borderCol = arts.length ? '#34d399' : 'var(--border)';
+          pubHtml += `<div style="margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid ${borderCol};">
+            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:${arts.length ? '8px' : '0'};">
+              <b style="font-size:0.78rem;color:${arts.length ? '#34d399' : 'var(--text-muted)'};text-transform:uppercase;">${sec.etiqueta}</b>
+              ${arts.length
+                ? `<span style="font-size:0.73rem;color:var(--text-muted);">${sec.n_encontrados} encontrados en PubMed</span>`
+                : `<span style="font-size:0.73rem;color:var(--text-muted);font-style:italic;">Sin resultados</span>`}
+            </div>`;
+          for (const art of arts) {
+            const uid = `abs_${art.pmid}_${Math.random().toString(36).slice(2,6)}`;
+            const abstractText = (art.abstract || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const lltOrigenes = (art.llt_origenes || []).filter(t => t && t !== terminoPrincipal);
+            const origenTexto = lltOrigenes.length
+              ? `LLT origen: ${lltOrigenes.join(', ')}`
+              : (terminoPrincipal ? `Coincidió con: ${terminoPrincipal}` : 'Coincidencia sin término detallado');
+            pubHtml += `<div style="margin-bottom:6px;">
+              <div onclick="togglePubAbstract('${uid}',this)" style="cursor:pointer;display:flex;align-items:flex-start;gap:6px;padding:5px 8px;border-radius:4px;background:color-mix(in srgb,var(--surface) 80%,var(--surface2) 20%);">
+                <span class="pm-arrow" style="color:#34d399;font-size:0.75rem;flex-shrink:0;margin-top:2px;">▶</span>
+                <div style="flex:1;">
+                  <span style="font-size:0.82rem;line-height:1.4;">${art.titulo || '(sin título)'}</span>
+                  <a href="https://pubmed.ncbi.nlm.nih.gov/${art.pmid}/" target="_blank" onclick="event.stopPropagation()" style="margin-left:8px;font-size:0.72rem;color:#34d399;white-space:nowrap;">PMID ${art.pmid}</a>
+                  <div style="margin-top:2px;font-size:0.71rem;color:var(--text-muted);">${origenTexto}</div>
+                </div>
+              </div>
+              <div id="${uid}" style="display:none;padding:8px 10px 4px 24px;font-size:0.78rem;line-height:1.55;color:var(--text-muted);white-space:pre-wrap;">${abstractText || 'Abstract no disponible.'}</div>
+            </div>`;
+          }
+          pubHtml += `</div>`;
+        }
+      } else {
+        const texto = c.texto || '';
+        const bloques = texto.split(/─{3,}/);
+        for (const bloque of bloques) {
+          if (!bloque.trim()) continue;
+          const tituloM = bloque.match(/([A-ZÁÉÍÓÚ\s]+)\s*\((\d+) artículos encontrados\)/);
+          const urlsM   = bloque.match(/URLs:\s*(.+)/);
+          if (!tituloM) continue;
+          const titulo = tituloM[1].trim();
+          const n      = tituloM[2];
+          const links  = urlsM ? urlsM[1].split('|').map(u => u.trim()).filter(Boolean) : [];
+          const pmids  = links.map(u => {
+            const m = u.match(/\/(\d+)\/?$/);
+            return m ? `<a href="${u}" target="_blank" style="color:#34d399;font-size:0.8rem;">PMID ${m[1]}</a>` : '';
+          }).filter(Boolean).join(' · ');
+          pubHtml += `<div style="margin-bottom:10px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #34d399;">
+            <b style="font-size:0.78rem;color:#34d399;">${titulo}</b>
+            <span style="font-size:0.75rem;color:var(--text-muted);margin-left:8px;">${n} artículos</span>
+            ${pmids ? `<div style="margin-top:6px;">${pmids}</div>` : '<div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;">Sin artículos</div>'}
+          </div>`;
+        }
+      }
+      return pubHtml || `<span style="color:var(--text-muted);font-size:0.82rem;">Sin resultados en PubMed</span>`;
+    }
+
+    if (id === 'prac_raw') {
+      const texto   = c.texto || '';
+      const docs    = c.prac_docs || [];
+
+      const sinResultados = !texto.trim()
+        || texto.startsWith('No se encontraron')
+        || texto.startsWith('Datos PRAC')
+        || /no aparece en las actas PRAC/i.test(texto);
+      if (sinResultados) {
+        return `
+          <div style="padding:12px 14px;background:color-mix(in srgb,var(--surface2) 90%,#f87171 10%);border-radius:8px;border-left:3px solid #f87171;">
+            <b style="font-size:0.78rem;color:#f87171;text-transform:uppercase;letter-spacing:0.05em;">Sin coincidencias</b><br/>
+            <span style="font-size:0.85rem;">${texto || 'No se identificaron coincidencias en PRAC/EMA.'}</span>
+          </div>`;
+      }
+
+      // Si tenemos datos estructurados del backend, usarlos directamente
+      if (docs.length > 0) {
+        const nConRam = docs.filter(d => d.ram_encontrada).length;
+        const nSinRam = docs.length - nConRam;
+
+        let pracHtml = '';
+        // Primero los docs con RAM confirmada, luego los que solo tienen el fármaco
+        const docsOrdenados = [...docs].sort((a, b) => (b.ram_encontrada ? 1 : 0) - (a.ram_encontrada ? 1 : 0));
+
+        for (const doc of docsOrdenados) {
+          const borderColor = doc.ram_encontrada ? '#fbbf24' : 'var(--border)';
+          const badgeColor  = doc.ram_encontrada ? '#fbbf24' : 'var(--text-muted)';
+          const badgeText   = doc.ram_encontrada ? '✓ RAM confirmada' : '○ Fármaco mencionado · sin coincidencia RAM';
+          const frags = doc.fragmentos || [];
+
+          pracHtml += `<div style="margin-bottom:10px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:3px solid ${borderColor};">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+              <div>
+                <b style="font-size:0.78rem;color:${badgeColor};text-transform:uppercase;">${doc.source || 'PRAC/EMA'}</b>
+                ${doc.date ? `<span style="margin-left:8px;font-size:0.73rem;color:var(--text-muted);">${doc.date}</span>` : ''}
+                <span style="margin-left:8px;font-size:0.72rem;color:${badgeColor};">${badgeText}</span>
+              </div>
+              ${doc.filename ? `<span style="font-size:0.7rem;color:var(--text-muted);font-family:monospace;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${doc.filename}">${doc.filename}</span>` : ''}
+            </div>`;
+
+          if (frags.length > 0) {
+            for (const frag of frags) {
+              // frag puede ser {texto, terminos_match} (nuevo) o string (legacy)
+              const fragTexto   = (typeof frag === 'object' ? frag.texto  : frag) || '';
+              const fragTerminos = (typeof frag === 'object' ? frag.terminos_match : []) || [];
+              const termsBadges = fragTerminos.map(t =>
+                `<span style="display:inline-block;margin-right:4px;padding:1px 6px;border-radius:10px;background:color-mix(in srgb,#fbbf24 18%,transparent);color:#fbbf24;font-size:0.7rem;font-weight:600;">${t}</span>`
+              ).join('');
+              pracHtml += `<div style="font-size:0.8rem;line-height:1.55;padding:6px 8px;margin-bottom:4px;background:color-mix(in srgb,var(--surface) 70%,var(--surface2) 30%);border-radius:4px;border-left:2px solid ${borderColor};">
+                ${termsBadges ? `<div style="margin-bottom:4px;">${termsBadges}</div>` : ''}
+                ${fragTexto.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br/>')}
+              </div>`;
+            }
+          } else {
+            pracHtml += `<div style="font-size:0.78rem;color:var(--text-muted);font-style:italic;padding:4px 8px;">Sin fragmentos con coincidencia directa de la RAM analizada.</div>`;
+          }
+          pracHtml += `</div>`;
+        }
+
+        const headerColor = nConRam > 0 ? '#fbbf24' : 'var(--text-muted)';
+        const headerText  = nConRam > 0
+          ? `${nConRam} doc(s) con RAM confirmada${nSinRam > 0 ? ` · ${nSinRam} sin coincidencia RAM` : ''}`
+          : `${nSinRam} doc(s) con fármaco mencionado · sin coincidencia RAM`;
+        return `<div style="margin-bottom:10px;padding:6px 12px;background:color-mix(in srgb,var(--surface2) 90%,${headerColor} 10%);border-radius:6px;border-left:3px solid ${headerColor};">
+          <b style="font-size:0.78rem;color:${headerColor};text-transform:uppercase;letter-spacing:0.05em;">PRAC/EMA · ${headerText}</b>
+        </div>
+        <div style="max-height:680px;overflow:auto;">${pracHtml}</div>`;
+      }
+
+      // Fallback para datos sin estructura (legacy)
+      return `<div style="max-height:280px;overflow:auto;white-space:pre-wrap;font-size:0.8rem;line-height:1.5;">${texto}</div>`;
+    }
+
+    if (id === 'pathway_commons_raw') {
+      const refs = c.pathway_commons_refs || [];
+      if (refs.length > 0) {
+        return `<div style="font-size:0.82rem;line-height:1.8;">` +
+          refs.map(r =>
+            `<div><span style="color:#22d3ee;font-weight:600;">[${r.tipo||''}]</span> ${r.nombre||''}</div>`
+          ).join('') +
+          `</div>`;
+      }
+      return `<span style="color:var(--text-muted);font-size:0.82rem;">${c.texto || 'Sin pathways encontrados'}</span>`;
+    }
+
+    if (id === 'pharmgkb_raw') {
+      const gd = c.genes_data || {};
+      const renderGrupo = (genes, titulo, color) => {
+        if (!genes || !genes.length) return '';
+        const bloques = genes.map(g => {
+          const badges = [
+            g.tiene_etiquetas_fda_ema ? `<span style="background:#1e3a5f;color:#60a5fa;padding:1px 6px;border-radius:10px;font-size:0.72rem;">FDA/EMA</span>` : '',
+            g.tiene_guias_cpic_dpwg   ? `<span style="background:#3b1f5e;color:#c084fc;padding:1px 6px;border-radius:10px;font-size:0.72rem;">CPIC/DPWG</span>` : '',
+          ].filter(Boolean).join(' ');
+          const enfermedades = (g.enfermedades || []).join(', ') || '—';
+          const contextos = (g.contextos_clinicos || []).join(', ') || '—';
+          const fenotiposHtml = (g.alelo_fenotipos || []).map(fp => {
+            const alelo = fp.alelo ? `<span style="font-weight:600;margin-right:4px;">${fp.alelo}</span>` : '';
+            return `<div style="margin-bottom:4px;">${alelo}${fp.fenotipo||''}</div>`;
+          }).join('') || '<span style="color:var(--text-muted);">—</span>';
+          return `<div style="padding:10px 12px;border:1px solid color-mix(in srgb, ${color} 22%, var(--border));border-radius:10px;background:var(--surface2);margin-bottom:8px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+              <div>
+                <b style="font-size:0.95rem;">${g.gen||''}</b>
+                <span style="margin-left:8px;color:${color};font-weight:700;">${g.nivel_evidencia||''}</span>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">${badges}</div>
+            </div>
+            <div style="margin-top:8px;font-size:0.8rem;line-height:1.55;display:grid;grid-template-columns:1fr;gap:4px;">
+              <div><b>Información recogida:</b></div>
+              <div><b>enfermedades:</b> ${enfermedades}</div>
+              <div><b>contextos_clinicos:</b> ${contextos}</div>
+            </div>
+            <div style="margin-top:8px;font-size:0.8rem;line-height:1.45;">
+              <b>Alelo/Fenotipo:</b>
+              <div style="max-height:120px;overflow-y:auto;margin-top:4px;">${fenotiposHtml}</div>
+            </div>
+          </div>`;
+        }).join('');
+        return `<div style="margin-bottom:12px;">
+          <b style="font-size:0.75rem;color:${color};text-transform:uppercase;letter-spacing:0.05em;">${titulo}</b>
+          <div style="margin-top:4px;">${bloques}</div>
+        </div>`;
+      };
+      const fuertes     = renderGrupo(gd.evidencia_fuerte_1A_1B,    'Evidencia fuerte (1A/1B)',    '#4ade80');
+      const secundarios = renderGrupo(gd.evidencia_secundaria_2A_2B, 'Evidencia secundaria (2A/2B)', '#f59e0b');
+      const bajaDatos   = gd.evidencia_baja_referencia;
+      const bajos       = Array.isArray(bajaDatos) ? renderGrupo(bajaDatos, 'Evidencia baja / referencia (3+)', '#9ca3af') : '';
+      if (fuertes || secundarios || bajos) {
+        return `<div>${fuertes}${secundarios}${bajos}</div>`;
+      } else if (c.texto && !c.texto.includes('Sin datos')) {
+        return `<div style="white-space:pre-wrap;font-size:0.8rem;line-height:1.5;max-height:300px;overflow:auto;">${c.texto}</div>`;
+      }
+      return `<span style="color:var(--text-muted);font-size:0.82rem;">Sin datos farmacogenéticos para este fármaco en PharmGKB</span>`;
+    }
+
+    if (id === 'fda_raw') {
+      const r = c.fda_refs || {};
+      if (r.pt) {
+        const apiUrl = `https://api.fda.gov/drug/event.json?search=patient.drug.medicinalproduct:%22${encodeURIComponent(r.farmaco_en||'')}%22%20AND%20patient.reaction.reactionmeddrapt:%22${encodeURIComponent(r.pt)}%22`;
+        const llts = r.llts || [];
+        const totalLlts = llts.reduce((s, l) => s + (l.total || 0), 0);
+        const fdaBase = `https://api.fda.gov/drug/event.json?search=patient.drug.medicinalproduct:%22${encodeURIComponent(r.farmaco_en||'')}%22%20AND%20patient.reaction.reactionmeddrapt:`;
+        const hdr = (txt) => `<b style="font-size:0.78rem;color:#60a5fa;text-transform:uppercase;display:block;margin-bottom:4px;">${txt}</b>`;
+        const lltLine = llts.length > 0 ? `
+          <div style="margin-top:8px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #60a5fa;">
+            ${hdr('Para LLTs')}
+            <div style="font-size:0.82rem;margin-bottom:4px;"><b>${totalLlts.toLocaleString()} casos</b></div>
+            ${llts.map(l => `<div style="font-size:0.79rem;margin-top:2px;color:var(--text-muted);">· ${l.termino}: <b style="color:var(--text);">${l.total.toLocaleString()} casos</b> <a href="${fdaBase}%22${encodeURIComponent(l.termino)}%22" target="_blank" style="color:#60a5fa;font-size:0.75rem;">enlace</a></div>`).join('')}
+          </div>
+          <div style="margin-top:8px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #60a5fa;">
+            ${hdr('En conjunto')}
+            <div style="font-size:0.82rem;"><b>${(r.total_combinado||0).toLocaleString()} casos</b></div>
+          </div>` : '';
+        return `
+          <div style="padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #60a5fa;margin-bottom:4px;">
+            ${hdr('Para PT · ' + r.pt)}
+            <div style="font-size:0.82rem;"><b>${(r.total_pt||0).toLocaleString()} casos</b> <a href="${apiUrl}" target="_blank" style="color:#60a5fa;font-size:0.8rem;">enlace</a></div>
+          </div>
+          ${lltLine}`;
+      }
+      return `<div style="white-space:pre-wrap;font-size:0.8rem;line-height:1.5;">${c.texto || 'No disponible'}</div>`;
+    }
+
+    // Default
+    const txt = c.texto || '';
+    return `<div style="white-space:pre-wrap;font-size:0.82rem;line-height:1.5;max-height:280px;overflow:auto;">${txt || '(sin contenido)'}</div>`;
+  }
+
   function renderSeccion(seccion) {
     let card = document.getElementById('card-' + seccion.id);
     
@@ -1301,275 +1666,9 @@
            + _subseccion('Conclusión Regulatoria',
         `<div style="font-size:0.85rem;">${c.conclusion_regulatoria||''}</div>`);
 
-    } else if (seccion.id === 'cima_raw') {
-      const ftUrl = c.ft_url || '';
-      const ftLink = ftUrl
-        ? `<a href="${ftUrl}" target="_blank" style="color:#a78bfa;font-weight:600;">Ver Ficha Técnica PDF →</a>`
-        : `<span style="color:var(--text-muted)">Ficha técnica no disponible</span>`;
-      const texto = c.texto || '';
-      const sinResultados = /^la\s+ram\s+['"].+['"]\s+no\s+aparece\s+en\s+la\s+ficha\s+t[ée]cnica\s+de\s+cima\.?$/i.test(texto.trim())
-        || texto.startsWith('Sin resultados en CIMA')
-        || texto.startsWith('Ficha técnica no disponible');
-
-      if (sinResultados) {
-        html = `
-          <div style="margin-bottom:10px;">${ftLink}</div>
-          <div style="padding:12px 14px;background:color-mix(in srgb,var(--surface2) 90%,#f87171 10%);border-radius:8px;border-left:3px solid #f87171;">
-            <b style="font-size:0.78rem;color:#f87171;text-transform:uppercase;letter-spacing:0.05em;">Sin coincidencias RAM en CIMA</b><br/>
-            <span style="font-size:0.85rem;">${texto || 'No se encontraron coincidencias en ficha técnica.'}</span>
-          </div>`;
-      } else {
-      const bloques = texto.split('\n\n---\n\n').filter(b => b.trim());
-      const CIMA_NOMBRES = {
-        '4.3': '4.3 · Contraindicaciones',
-        '4.4': '4.4 · Advertencias y precauciones especiales',
-        '4.5': '4.5 · Interacción con otros medicamentos',
-        '4.8': '4.8 · Reacciones adversas',
-        '4.9': '4.9 · Sobredosis',
-        '5.1': '5.1 · Propiedades farmacodinámicas',
-        '5.2': '5.2 · Propiedades farmacocinéticas',
-      };
-      let cimaHtml = '';
-      for (const bloque of bloques) {
-        const numM = bloque.match(/^(\d+)\.(\d+)/);
-        const key = numM ? `${numM[1]}.${numM[2]}` : null;
-        const header = key ? (CIMA_NOMBRES[key] || key) : 'Información';
-        const isRAM = key === '4.8';
-        const borderColor = isRAM ? '#a78bfa' : '#7c3aed';
-        cimaHtml += `<div style="margin-bottom:10px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid ${borderColor};">
-          <b style="font-size:0.78rem;color:#a78bfa;text-transform:uppercase;display:block;margin-bottom:4px;">${header}</b>
-          <div style="font-size:0.82rem;line-height:1.6;white-space:pre-wrap;">${bloque.trim()}</div>
-        </div>`;
-      }
-      html = `
-        <div style="margin-bottom:10px;">${ftLink}</div>
-        <div style="max-height:300px;overflow:auto;">
-          ${cimaHtml || `<span style="color:var(--text-muted);font-size:0.82rem;">Sin secciones encontradas</span>`}
-        </div>`;
-      }
-
-    } else if (seccion.id === 'drugbank_raw') {
-      const texto = c.texto || '';
-      const bloques = texto.split('\n\n').filter(b => b.trim());
-      let dbHtml = '';
-      for (let i = 0; i < bloques.length; i++) {
-        const bloque = bloques[i].trim();
-        if (i === 0) {
-          // Bloque de cabecera: === DrugBank: INN (ID) === + metadatos
-          const lineas = bloque.split('\n');
-          const titulo = lineas[0].replace(/=/g, '').trim();
-          const meta   = lineas.slice(1).join('\n').trim();
-          dbHtml += `<div style="margin-bottom:12px;padding:6px 12px;background:color-mix(in srgb,var(--surface2) 90%,#6366f1 10%);border-radius:6px;border-left:3px solid #6366f1;">
-            <b style="font-size:0.82rem;color:#6366f1;">${titulo}</b>
-            ${meta ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;white-space:pre-wrap;">${meta}</div>` : ''}
-          </div>`;
-        } else {
-          const lineas = bloque.split('\n');
-          const header  = lineas[0].trim().replace(/:$/, '');
-          const content = lineas.slice(1).join('\n').trim();
-          if (!header) continue;
-          dbHtml += `<div style="margin-bottom:8px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #6366f1;">
-            <b style="font-size:0.78rem;color:#6366f1;text-transform:uppercase;display:block;margin-bottom:4px;">${header}</b>
-            ${content ? `<div style="font-size:0.82rem;line-height:1.5;white-space:pre-wrap;">${content}</div>` : ''}
-          </div>`;
-        }
-      }
-      html = `<div style="max-height:300px;overflow:auto;">
-        ${dbHtml || `<div style="white-space:pre-wrap;font-size:0.8rem;line-height:1.5;">${texto}</div>`}
-      </div>`;
-
-    } else if (seccion.id === 'pubmed_raw') {
-      const secciones = c.pubmed_secciones;
-      let pubHtml = '';
-      if (secciones && secciones.length > 0) {
-        const totalDescargados = secciones.reduce((s, sec) => s + (sec.articulos || []).length, 0);
-        pubHtml += `<div style="margin-bottom:12px;padding:6px 12px;background:color-mix(in srgb,var(--surface2) 90%,#34d399 10%);border-radius:6px;border-left:3px solid #34d399;">
-          <span style="font-size:0.78rem;color:#34d399;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Artículos seleccionados: ${totalDescargados}</span>
-        </div>`;
-        for (const sec of secciones) {
-          const arts = sec.articulos || [];
-          const terminoPrincipal = (sec.terminos_busqueda || [])[0] || '';
-          const borderCol = arts.length ? '#34d399' : 'var(--border)';
-          pubHtml += `<div style="margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid ${borderCol};">
-            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:${arts.length ? '8px' : '0'};">
-              <b style="font-size:0.78rem;color:${arts.length ? '#34d399' : 'var(--text-muted)'};text-transform:uppercase;">${sec.etiqueta}</b>
-              ${arts.length
-                ? `<span style="font-size:0.73rem;color:var(--text-muted);">${sec.n_encontrados} encontrados en PubMed</span>`
-                : `<span style="font-size:0.73rem;color:var(--text-muted);font-style:italic;">Sin resultados</span>`}
-            </div>`;
-          if (arts.length === 0) {
-            pubHtml += '';
-          } else {
-            for (const art of arts) {
-              const uid = `abs_${art.pmid}_${Math.random().toString(36).slice(2,6)}`;
-              const abstractText = (art.abstract || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-              const lltOrigenes = (art.llt_origenes || []).filter(t => t && t !== terminoPrincipal);
-              const origenTexto = lltOrigenes.length
-                ? `LLT origen: ${lltOrigenes.join(', ')}`
-                : (terminoPrincipal ? `Coincidió con: ${terminoPrincipal}` : 'Coincidencia sin término detallado');
-              pubHtml += `<div style="margin-bottom:6px;">
-                <div onclick="togglePubAbstract('${uid}',this)" style="cursor:pointer;display:flex;align-items:flex-start;gap:6px;padding:5px 8px;border-radius:4px;background:color-mix(in srgb,var(--surface) 80%,var(--surface2) 20%);">
-                  <span class="pm-arrow" style="color:#34d399;font-size:0.75rem;flex-shrink:0;margin-top:2px;">▶</span>
-                  <div style="flex:1;">
-                    <span style="font-size:0.82rem;line-height:1.4;">${art.titulo || '(sin título)'}</span>
-                    <a href="https://pubmed.ncbi.nlm.nih.gov/${art.pmid}/" target="_blank" onclick="event.stopPropagation()" style="margin-left:8px;font-size:0.72rem;color:#34d399;white-space:nowrap;">PMID ${art.pmid}</a>
-                    <div style="margin-top:2px;font-size:0.71rem;color:var(--text-muted);">${origenTexto}</div>
-                  </div>
-                </div>
-                <div id="${uid}" style="display:none;padding:8px 10px 4px 24px;font-size:0.78rem;line-height:1.55;color:var(--text-muted);white-space:pre-wrap;">${abstractText || 'Abstract no disponible.'}</div>
-              </div>`;
-            }
-          }
-          pubHtml += `</div>`;
-        }
-      } else {
-        // fallback: parseo del texto plano (compatibilidad)
-        const texto = c.texto || '';
-        const bloques = texto.split(/─{3,}/);
-        for (const bloque of bloques) {
-          if (!bloque.trim()) continue;
-          const tituloM = bloque.match(/([A-ZÁÉÍÓÚ\s]+)\s*\((\d+) artículos encontrados\)/);
-          const urlsM   = bloque.match(/URLs:\s*(.+)/);
-          if (!tituloM) continue;
-          const titulo = tituloM[1].trim();
-          const n      = tituloM[2];
-          const links  = urlsM ? urlsM[1].split('|').map(u => u.trim()).filter(Boolean) : [];
-          const pmids  = links.map(u => {
-            const m = u.match(/\/(\d+)\/?$/);
-            return m ? `<a href="${u}" target="_blank" style="color:#34d399;font-size:0.8rem;">PMID ${m[1]}</a>` : '';
-          }).filter(Boolean).join(' · ');
-          pubHtml += `<div style="margin-bottom:10px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #34d399;">
-            <b style="font-size:0.78rem;color:#34d399;">${titulo}</b>
-            <span style="font-size:0.75rem;color:var(--text-muted);margin-left:8px;">${n} artículos</span>
-            ${pmids ? `<div style="margin-top:6px;">${pmids}</div>` : '<div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;">Sin artículos</div>'}
-          </div>`;
-        }
-      }
-      html = pubHtml || `<span style="color:var(--text-muted);font-size:0.82rem;">Sin resultados en PubMed</span>`;
-
-    } else if (seccion.id === 'prac_raw') {
-      const texto = c.texto || '';
-      const sinResultados = !texto.trim()
-        || texto.startsWith('No se encontraron')
-        || texto.startsWith('Datos PRAC')
-        || /no aparece en las actas PRAC/i.test(texto);
-      if (sinResultados) {
-        html = `
-          <div style="padding:12px 14px;background:color-mix(in srgb,var(--surface2) 90%,#f87171 10%);border-radius:8px;border-left:3px solid #f87171;margin-bottom:12px;">
-            <b style="font-size:0.78rem;color:#f87171;text-transform:uppercase;letter-spacing:0.05em;">Sin coincidencias</b><br/>
-            <span style="font-size:0.85rem;">${texto || 'No se identificaron coincidencias en PRAC/EMA.'}</span>
-          </div>`;
-      } else {
-        const docs = (texto.match(/^──\s+/gm) || []).length;
-        const badgeColor = docs > 0 ? '#34d399' : '#f59e0b';
-        const badgeText = docs > 0
-          ? `${docs} documento(s) PRAC/EMA con fragmentos relevantes`
-          : 'Se encontraron menciones, pero sin fragmentos estructurados';
-        html = `
-          <div style="padding:10px 14px;background:color-mix(in srgb,var(--surface2) 90%,${badgeColor} 10%);border-radius:8px;border-left:3px solid ${badgeColor};margin-bottom:14px;">
-            <b style="font-size:0.78rem;color:${badgeColor};text-transform:uppercase;letter-spacing:0.05em;">PRAC/EMA · Señales</b><br/>
-            <span style="font-size:0.85rem;">${badgeText}</span>
-          </div>
-          <div style="white-space: pre-wrap; font-size: 0.8rem; line-height: 1.5;">${texto}</div>`;
-      }
-
-    } else if (seccion.id === 'reactome_raw') {
-      const pathways = c.pathways || [];
-      if (pathways.length > 0) {
-        html = `<div style="font-size:0.82rem;line-height:1.8;">` +
-          pathways.map(p =>
-            `<div><a href="${p.url}" target="_blank" style="color:#22d3ee;font-weight:600;">[${p.stId}]</a> ${p.name}</div>`
-          ).join('') +
-          `</div>`;
-      } else {
-        html = `<span style="color:var(--text-muted);font-size:0.82rem;">${c.texto || 'Sin pathways encontrados'}</span>`;
-      }
-
-    } else if (seccion.id === 'pharmgkb_raw') {
-      const gd = c.genes_data || {};
-      const renderGrupo = (genes, titulo, color) => {
-        if (!genes || !genes.length) return '';
-        const bloques = genes.map(g => {
-          const badges = [
-            g.tiene_etiquetas_fda_ema ? `<span style="background:#1e3a5f;color:#60a5fa;padding:1px 6px;border-radius:10px;font-size:0.72rem;">FDA/EMA</span>` : '',
-            g.tiene_guias_cpic_dpwg   ? `<span style="background:#3b1f5e;color:#c084fc;padding:1px 6px;border-radius:10px;font-size:0.72rem;">CPIC/DPWG</span>` : '',
-          ].filter(Boolean).join(' ');
-          const enfermedades = (g.enfermedades || []).join(', ') || '—';
-          const contextos = (g.contextos_clinicos || []).join(', ') || '—';
-
-          const fenotiposHtml = (g.alelo_fenotipos || []).map(fp => {
-            const alelo = fp.alelo ? `<span style="font-weight:600;color:${color};margin-right:4px;">${fp.alelo}</span>` : '';
-            return `<div style="margin-bottom:4px;">${alelo}${fp.fenotipo||''}</div>`;
-          }).join('') || '<span style="color:var(--text-muted);">—</span>';
-
-          return `<div style="padding:10px 12px;border:1px solid color-mix(in srgb, ${color} 22%, var(--border));border-radius:10px;background:var(--surface2);margin-bottom:8px;">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-              <div>
-                <b style="font-size:0.95rem;">${g.gen||''}</b>
-                <span style="margin-left:8px;color:${color};font-weight:700;">${g.nivel_evidencia||''}</span>
-              </div>
-              <div style="display:flex;gap:6px;flex-wrap:wrap;">${badges}</div>
-            </div>
-            <div style="margin-top:8px;font-size:0.8rem;line-height:1.55;display:grid;grid-template-columns:1fr;gap:4px;">
-              <div><b>Información recogida:</b></div>
-              <div><b>enfermedades:</b> ${enfermedades}</div>
-              <div><b>contextos_clinicos:</b> ${contextos}</div>
-            </div>
-            <div style="margin-top:8px;font-size:0.8rem;line-height:1.45;">
-              <b>Alelo/Fenotipo:</b>
-              <div style="max-height:120px;overflow-y:auto;margin-top:4px;">${fenotiposHtml}</div>
-            </div>
-          </div>`;
-        }).join('');
-        return `<div style="margin-bottom:12px;">
-          <b style="font-size:0.75rem;color:${color};text-transform:uppercase;letter-spacing:0.05em;">${titulo}</b>
-          <div style="margin-top:4px;">${bloques}</div>
-        </div>`;
-      };
-      const fuertes    = renderGrupo(gd.evidencia_fuerte_1A_1B,    'Evidencia fuerte (1A/1B)',    '#4ade80');
-      const secundarios = renderGrupo(gd.evidencia_secundaria_2A_2B, 'Evidencia secundaria (2A/2B)', '#f59e0b');
-      const bajaDatos  = gd.evidencia_baja_referencia;
-      const bajos      = Array.isArray(bajaDatos)
-        ? renderGrupo(bajaDatos, 'Evidencia baja / referencia (3+)', '#9ca3af')
-        : '';
-      if (fuertes || secundarios || bajos) {
-        html = `<div>${fuertes}${secundarios}${bajos}</div>`;
-      } else if (c.texto && !c.texto.includes('Sin datos')) {
-        // Hay texto de error o resultado alternativo — mostrarlo
-        html = `<div style="white-space:pre-wrap;font-size:0.8rem;line-height:1.5;max-height:300px;overflow:auto;">${c.texto}</div>`;
-      } else {
-        html = `<span style="color:var(--text-muted);font-size:0.82rem;">Sin datos farmacogenéticos para este fármaco en PharmGKB</span>`;
-      }
-
-    } else if (seccion.id === 'fda_raw') {
-      const r = c.fda_refs || {};
-      if (r.pt) {
-        const apiUrl = `https://api.fda.gov/drug/event.json?search=patient.drug.medicinalproduct:%22${encodeURIComponent(r.farmaco_en||'')}%22%20AND%20patient.reaction.reactionmeddrapt:%22${encodeURIComponent(r.pt)}%22`;
-        const llts = r.llts || [];
-        const totalLlts = llts.reduce((s, l) => s + (l.total || 0), 0);
-        const fdaBase = `https://api.fda.gov/drug/event.json?search=patient.drug.medicinalproduct:%22${encodeURIComponent(r.farmaco_en||'')}%22%20AND%20patient.reaction.reactionmeddrapt:`;
-        const hdr = (txt) => `<b style="font-size:0.78rem;color:#60a5fa;text-transform:uppercase;display:block;margin-bottom:4px;">${txt}</b>`;
-        const lltLine = llts.length > 0 ? `
-          <div style="margin-top:8px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #60a5fa;">
-            ${hdr('Para LLTs')}
-            <div style="font-size:0.82rem;margin-bottom:4px;"><b>${totalLlts.toLocaleString()} casos</b></div>
-            ${llts.map(l => `<div style="font-size:0.79rem;margin-top:2px;color:var(--text-muted);">· ${l.termino}: <b style="color:var(--text);">${l.total.toLocaleString()} casos</b> <a href="${fdaBase}%22${encodeURIComponent(l.termino)}%22" target="_blank" style="color:#60a5fa;font-size:0.75rem;">enlace</a></div>`).join('')}
-          </div>
-          <div style="margin-top:8px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #60a5fa;">
-            ${hdr('En conjunto')}
-            <div style="font-size:0.82rem;"><b>${(r.total_combinado||0).toLocaleString()} casos</b></div>
-          </div>` : '';
-        html = `
-          <div style="padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #60a5fa;margin-bottom:4px;">
-            ${hdr('Para PT · ' + r.pt)}
-            <div style="font-size:0.82rem;"><b>${(r.total_pt||0).toLocaleString()} casos</b> <a href="${apiUrl}" target="_blank" style="color:#60a5fa;font-size:0.8rem;">enlace</a></div>
-          </div>
-          ${lltLine}`;
-      } else {
-        html = `<div style="white-space:pre-wrap;font-size:0.8rem;line-height:1.5;">${c.texto || 'No disponible'}</div>`;
-      }
+    } else {
+      html = buildRawSectionHtml(seccion.id, c);
     }
-
     body.innerHTML = `<div class="card-body">${html}</div>${contraHtml}`;
 
     // Store for chat context
@@ -1584,6 +1683,7 @@
   async function generate() {
     const btn = document.getElementById('generate-btn');
     btn.disabled = true;
+    bloquearFormularioInt(true);  // bloquear interacciones desde el primer momento
     document.getElementById('log').innerHTML = '';
     document.getElementById('informe-header').style.display = 'none';
     document.getElementById('cards-grid').style.display = 'none';
@@ -1628,9 +1728,16 @@
     fd.append('edad',      reportData.edad);
     fd.append('sexo',      reportData.sexo);
     fd.append('etnia',     reportData.etnia);
-    fd.append('narrativa', (document.getElementById('narrativa') || {value:''}).value.trim());
 
-    const res = await fetch('/generate_manual', { method: 'POST', body: fd });
+
+    activeGenController = new AbortController();
+    let res;
+    try {
+      res = await fetch('/generate_manual', { method: 'POST', body: fd, signal: activeGenController.signal });
+    } catch (err) {
+      if (err?.name === 'AbortError') return; // cancelado por nuevoAnalisis()
+      log(`ERROR: ${err.message}`); btn.disabled = false; return;
+    }
     if (!res.ok || !res.body) {
       const errorText = await res.text();
       log(`ERROR: no se pudo iniciar la generación (${res.status}). ${errorText}`);
@@ -1643,7 +1750,7 @@
 
     crearTarjetas();
 
-    while (true) {
+    try { while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
@@ -1697,20 +1804,245 @@
           onGenerationComplete();
         }
       }
+    } } catch (err) {
+      if (err?.name !== 'AbortError') { log(`ERROR: ${err.message}`); btn.disabled = false; }
     }
   }
 
   function onGenerationComplete() {
     chatReady = true;
-    // Open chat panel automatically
     document.getElementById('chat-panel').classList.add('open');
     document.getElementById('chat-fab').classList.remove('visible');
-    // Remove welcome placeholder from chat
     const welcome = document.getElementById('chat-welcome');
     if (welcome) welcome.remove();
     appendChatMsg('ai', `Análisis completado para **${reportData.farmaco}** (${reportData.cod_dedra}).
 Puedes preguntarme sobre cualquier sección o pedirme que amplíe, contraste o simplifique algún bloque.`);
+    guardarAnalisisEnHistorial();
+    bloquearFormularioRAM(true);
+    bloquearFormularioInt(true);
   }
+
+  const RAM_FORM_IDS = ['farmaco-input', 'cod-dedra-input', 'edad', 'sexo', 'etnia'];
+  function bloquearFormularioRAM(bloquear) {
+    RAM_FORM_IDS.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = bloquear;
+    });
+    // bloquear también botones del autocomplete de fármaco y MedDRA
+    ['farmaco-clear-btn', 'meddra-clear-btn'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = bloquear;
+    });
+    const btn = document.getElementById('generate-btn');
+    if (btn) btn.disabled = bloquear;
+  }
+
+  function bloquearFormularioInt(bloquear) {
+    ['int-edad', 'int-sexo', 'int-etnia', 'int-cod-dedra-input'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = bloquear;
+    });
+    // Bloquear inputs y botones de fármacos en interacciones
+    document.querySelectorAll('[id^="int-farmaco-input-"]').forEach(el => el.disabled = bloquear);
+    document.querySelectorAll('.int-remove-btn').forEach(el => el.disabled = bloquear);
+    const addBtn = document.getElementById('int-add-btn');
+    if (addBtn) addBtn.disabled = bloquear;
+    const btn = document.getElementById('int-generate-btn');
+    if (btn) btn.disabled = bloquear;
+  }
+
+  /* ─────────────────────────────────────────────
+     Historial de sesión (sessionStorage)
+  ───────────────────────────────────────────── */
+  const HIST_KEY = 'drugwatch_session_history';
+  let historialActivo = null; // id del análisis actualmente visible
+
+  function _getHistorial() {
+    try { return JSON.parse(sessionStorage.getItem(HIST_KEY) || '[]'); }
+    catch { return []; }
+  }
+  function _saveHistorial(arr) {
+    try { sessionStorage.setItem(HIST_KEY, JSON.stringify(arr)); } catch {}
+  }
+
+  function guardarAnalisisEnHistorial() {
+    const id = Date.now().toString();
+    const hora = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    const entrada = {
+      id,
+      label:    reportData.farmaco || '?',
+      ram:      reportData.ram || '',
+      hora,
+      reportData: JSON.parse(JSON.stringify(reportData)),
+      chatSessionId,
+      farmacoResolved: farmacoResolved ? JSON.parse(JSON.stringify(farmacoResolved)) : null,
+      meddraResolved:  meddraResolved  ? JSON.parse(JSON.stringify(meddraResolved))  : null,
+      // Capturamos el HTML de los resultados para poder restaurar
+      headerHtml: document.getElementById('informe-header').innerHTML,
+      cardsHtml:  document.getElementById('cards-grid').innerHTML,
+      formVals: {
+        farmaco:   document.getElementById('farmaco-input') ? document.getElementById('farmaco-input').value : '',
+        codDedra:  document.getElementById('cod-dedra').value,
+        edad:      document.getElementById('edad').value,
+        sexo:      document.getElementById('sexo').value,
+        etnia:     document.getElementById('etnia').value,
+      },
+    };
+    const hist = _getHistorial();
+    hist.unshift(entrada); // más reciente primero
+    _saveHistorial(hist.slice(0, 20)); // máximo 20 análisis guardados
+    historialActivo = id;
+    renderHistorialSidebar();
+  }
+
+  function renderHistorialSidebar() {
+    const lista = document.getElementById('historial-lista');
+    const hist  = _getHistorial();
+    if (!hist.length) {
+      lista.innerHTML = '<div id="historial-vacio">Sin análisis anteriores</div>';
+      return;
+    }
+    lista.innerHTML = hist.map(e => `
+      <div class="historial-item${historialActivo === e.id ? ' active' : ''}"
+           onclick="restaurarAnalisis('${e.id}')" title="${e.label} — ${e.ram}">
+        <div class="hi-farmaco">${e.tipo === 'interaccion' ? '⇄ ' : ''}${e.label}</div>
+        <div class="hi-ram">${e.ram || '—'}</div>
+        <div class="hi-time">${e.hora}</div>
+      </div>
+    `).join('');
+  }
+
+  function restaurarAnalisis(id) {
+    const hist = _getHistorial();
+    const entrada = hist.find(e => e.id === id);
+    if (!entrada) return;
+    historialActivo = id;
+
+    if (entrada.tipo === 'interaccion') {
+      // ── Restaurar análisis de interacciones ──
+      intFarmacos        = entrada.intFarmacos || [];
+      intMeddraResolved  = entrada.intMeddraResolved || null;
+
+      document.getElementById('int-results-tab-bar').innerHTML  = entrada.tabBarHtml  || '';
+      document.getElementById('int-results-content').innerHTML  = entrada.tabContentHtml || '';
+      document.getElementById('int-results').style.display      = 'block';
+
+      const f = entrada.formVals || {};
+      if (document.getElementById('int-edad'))  document.getElementById('int-edad').value  = f.edad  || '';
+      if (document.getElementById('int-sexo'))  document.getElementById('int-sexo').value  = f.sexo  || '';
+      if (document.getElementById('int-etnia')) document.getElementById('int-etnia').value = f.etnia || '';
+      if (document.getElementById('int-cod-dedra')) document.getElementById('int-cod-dedra').value = f.codDedra || '';
+
+      switchMainTab('interacciones');
+      renderHistorialSidebar();
+      document.getElementById('int-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    } else {
+      // ── Restaurar análisis RAM individual ──
+      reportData      = entrada.reportData;
+      chatSessionId   = entrada.chatSessionId;
+      farmacoResolved = entrada.farmacoResolved;
+      meddraResolved  = entrada.meddraResolved;
+
+      const header = document.getElementById('informe-header');
+      const cards  = document.getElementById('cards-grid');
+      header.innerHTML     = entrada.headerHtml;
+      header.style.display = entrada.headerHtml.trim() ? 'block' : 'none';
+      cards.innerHTML      = entrada.cardsHtml;
+      cards.style.display  = entrada.cardsHtml.trim() ? 'grid' : 'none';
+
+      const f = entrada.formVals || {};
+      if (document.getElementById('farmaco-input')) document.getElementById('farmaco-input').value = f.farmaco || '';
+      document.getElementById('cod-dedra').value  = f.codDedra  || '';
+      document.getElementById('edad').value       = f.edad      || '';
+      document.getElementById('sexo').value       = f.sexo      || '';
+      document.getElementById('etnia').value      = f.etnia     || '';
+
+
+      switchMainTab('analisis');
+      renderHistorialSidebar();
+      document.getElementById('informe-header').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
+  function nuevoAnalisis() {
+    // Cancelar cualquier stream en curso
+    if (activeGenController) {
+      activeGenController.abort();
+      activeGenController = null;
+    }
+
+    // Limpiar resultados análisis RAM
+    document.getElementById('informe-header').style.display = 'none';
+    document.getElementById('cards-grid').style.display = 'none';
+    document.getElementById('log').innerHTML = '';
+    chatReady = false;
+    chatHistory = [];
+    chatSessionId = null;
+    historialActivo = null;
+    reportData = {};
+
+    // Desbloquear ambos formularios antes de limpiar
+    bloquearFormularioRAM(false);
+    bloquearFormularioInt(false);
+
+    // Limpiar formulario RAM
+    farmacoClear();
+    meddraClear();
+    document.getElementById('edad').value  = '';
+    document.getElementById('sexo').value  = '';
+    document.getElementById('etnia').value = '';
+
+
+    // Limpiar formulario de interacciones
+    intFarmacos = [null, null];
+    intMeddraResolved = null;
+    renderIntFarmacoRows();
+    intMeddraClear();
+    if (document.getElementById('int-edad'))  document.getElementById('int-edad').value  = '';
+    if (document.getElementById('int-sexo'))  document.getElementById('int-sexo').value  = '';
+    if (document.getElementById('int-etnia')) document.getElementById('int-etnia').value = '';
+    document.getElementById('int-results').style.display = 'none';
+    document.getElementById('int-log').innerHTML = '';
+
+    renderHistorialSidebar();
+    document.getElementById('main-content').scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function guardarInteraccionEnHistorial(farmacos, ram, codDedra) {
+    const id   = Date.now().toString();
+    const hora = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    const nombres = farmacos.map(f => f.name_es || f.inn).join(' + ');
+    const entrada = {
+      id,
+      tipo:   'interaccion',
+      label:  nombres,
+      ram,
+      hora,
+      codDedra,
+      intFarmacos: JSON.parse(JSON.stringify(intFarmacos)),
+      intMeddraResolved: intMeddraResolved ? JSON.parse(JSON.stringify(intMeddraResolved)) : null,
+      tabBarHtml:     document.getElementById('int-results-tab-bar').innerHTML,
+      tabContentHtml: document.getElementById('int-results-content').innerHTML,
+      formVals: {
+        edad:  document.getElementById('int-edad')?.value  || '',
+        sexo:  document.getElementById('int-sexo')?.value  || '',
+        etnia: document.getElementById('int-etnia')?.value || '',
+        codDedra,
+      },
+    };
+    const hist = _getHistorial();
+    hist.unshift(entrada);
+    _saveHistorial(hist.slice(0, 20));
+    historialActivo = id;
+    renderHistorialSidebar();
+  }
+
+  // Nueva sesión en cada carga de página — limpiar historial anterior
+  document.addEventListener('DOMContentLoaded', () => {
+    sessionStorage.removeItem(HIST_KEY);
+    renderHistorialSidebar();
+  });
 
   /* ─────────────────────────────────────────────
      Chat panel
@@ -2161,6 +2493,7 @@ Puedes preguntarme sobre cualquier sección o pedirme que amplíe, contraste o s
   async function generateInteracciones() {
     const btn = document.getElementById('int-generate-btn');
     btn.disabled = true;
+    bloquearFormularioRAM(true);  // bloquear RAM desde el primer momento
 
     const logEl = document.getElementById('int-log');
     logEl.innerHTML = '';
@@ -2204,7 +2537,14 @@ Puedes preguntarme sobre cualquier sección o pedirme que amplíe, contraste o s
     fd.append('sexo',           document.getElementById('int-sexo')?.value         || '');
     fd.append('etnia',          document.getElementById('int-etnia')?.value.trim() || '');
 
-    const res = await fetch('/generate_interacciones', { method: 'POST', body: fd });
+    activeGenController = new AbortController();
+    let res;
+    try {
+      res = await fetch('/generate_interacciones', { method: 'POST', body: fd, signal: activeGenController.signal });
+    } catch (err) {
+      if (err?.name === 'AbortError') return; // cancelado por nuevoAnalisis()
+      intLog(`ERROR: ${err.message}`); btn.disabled = false; return;
+    }
     if (!res.ok || !res.body) {
       intLog(`ERROR: no se pudo iniciar (${res.status})`);
       btn.disabled = false; return;
@@ -2218,7 +2558,7 @@ Puedes preguntarme sobre cualquier sección o pedirme que amplíe, contraste o s
     const decoder = new TextDecoder();
     let buffer = '';
 
-    while (true) {
+    try { while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
@@ -2235,11 +2575,19 @@ Puedes preguntarme sobre cualquier sección o pedirme que amplíe, contraste o s
           renderIntCardFarmaco(evt.farmaco_idx, evt);
         } else if (evt.tipo === 'seccion_interaccion') {
           renderIntCardInteraccion(evt);
+        } else if (evt.tipo === 'informe_int') {
+          renderInformeInt(evt.contenido);
+          switchIntTab('informe-int');
         } else if (evt.tipo === 'fin_int') {
           intLog('✓ ' + evt.mensaje);
           btn.disabled = false;
+          guardarInteraccionEnHistorial(farmacos, ramEs || ramEn, codDedra);
+          bloquearFormularioInt(true);
+          bloquearFormularioRAM(true);
         }
       }
+    } } catch (err) {
+      if (err?.name !== 'AbortError') { intLog(`ERROR: ${err.message}`); btn.disabled = false; }
     }
   }
 
@@ -2254,8 +2602,26 @@ Puedes preguntarme sobre cualquier sección o pedirme que amplíe, contraste o s
       const label = `Fármaco ${idx+1}: ${f.name_es || f.inn}`;
       bar.innerHTML += `<button class="results-tab ${idx===0?'active':''}" id="restab-farmaco-${idx}"
         onclick="switchIntTab('farmaco-${idx}')">${label}</button>`;
+
+      // Pre-crear tarjetas en orden fijo (igual que crearTarjetas del tab individual)
+      let gridHtml = '';
+      SECCIONES_RAW.forEach(s => {
+        gridHtml += `
+          <div class="card loading raw-data" id="int-card-${idx}-${s.id}"
+               style="${getIntCardColor(s.id)}">
+            <div class="card-header">
+              <span class="card-title">${s.titulo}</span>
+              <div class="card-spinner" id="int-spin-${idx}-${s.id}"></div>
+            </div>
+            <div class="sources" id="int-src-${idx}-${s.id}"></div>
+            <div id="int-body-${idx}-${s.id}">
+              <div class="card-body"><span class="card-loading-text">Recopilando datos...</span></div>
+            </div>
+          </div>`;
+      });
+
       content.innerHTML += `<div class="results-tab-panel ${idx===0?'active':''}" id="respanel-farmaco-${idx}">
-        <div class="int-cards-grid" id="int-grid-farmaco-${idx}"></div>
+        <div class="int-cards-grid" id="int-grid-farmaco-${idx}">${gridHtml}</div>
       </div>`;
     });
 
@@ -2263,6 +2629,20 @@ Puedes preguntarme sobre cualquier sección o pedirme que amplíe, contraste o s
       onclick="switchIntTab('interacciones')">Interacciones</button>`;
     content.innerHTML += `<div class="results-tab-panel" id="respanel-interacciones">
       <div class="int-cards-grid" id="int-grid-interacciones"></div>
+    </div>`;
+
+    bar.innerHTML += `<button class="results-tab" id="restab-informe-int"
+      onclick="switchIntTab('informe-int')">Informe</button>`;
+    content.innerHTML += `<div class="results-tab-panel" id="respanel-informe-int">
+      <div class="int-cards-grid" id="int-grid-informe-int">
+        <div class="card loading" id="int-card-informe">
+          <div class="card-header">
+            <span class="card-title">Informe de interacción</span>
+            <div class="card-spinner" id="int-spin-informe"></div>
+          </div>
+          <div class="card-body"><span class="card-loading-text">Generando con IA...</span></div>
+        </div>
+      </div>
     </div>`;
   }
 
@@ -2273,23 +2653,23 @@ Puedes preguntarme sobre cualquier sección o pedirme que amplíe, contraste o s
     document.getElementById(`respanel-${tabId}`)?.classList.add('active');
   }
 
-  /* ── Render per-drug card ── */
+  /* ── Render per-drug card (updates pre-created slots) ── */
   function renderIntCardFarmaco(idx, seccion) {
-    const grid = document.getElementById(`int-grid-farmaco-${idx}`);
-    if (!grid) return;
     const cardId = `int-card-${idx}-${seccion.id}`;
-    if (!document.getElementById(cardId)) {
-      const isRaw = ['cima_raw','fda_raw','drugbank_raw','pharmgkb_raw','pubmed_raw','prac_raw','reactome_raw'].includes(seccion.id);
-      grid.innerHTML += `
-        <div class="card ${isRaw?'raw-data':''} ${seccion.estado==='error'?'error':'done'}" id="${cardId}"
-             style="${isRaw ? getIntCardColor(seccion.id) : ''}">
-          <div class="card-header">
-            <span class="card-title">${seccion.titulo}</span>
-            <span class="card-check">${seccion.estado==='error'?'✗':'✓'}</span>
-          </div>
-          <div class="sources" id="int-src-${idx}-${seccion.id}"></div>
-          <div id="int-body-${idx}-${seccion.id}"></div>
-        </div>`;
+    const card   = document.getElementById(cardId);
+    if (!card) return;
+    // Actualizar estado de la tarjeta
+    card.classList.remove('loading');
+    card.classList.add(seccion.estado === 'error' ? 'error' : 'done');
+    // Ocultar spinner y mostrar check
+    const spin = document.getElementById(`int-spin-${idx}-${seccion.id}`);
+    if (spin) { spin.style.display = 'none'; }
+    const hdr = card.querySelector('.card-header');
+    if (hdr && !hdr.querySelector('.card-check')) {
+      const chk = document.createElement('span');
+      chk.className   = 'card-check';
+      chk.textContent = seccion.estado === 'error' ? '✗' : '✓';
+      hdr.appendChild(chk);
     }
     const srcEl  = document.getElementById(`int-src-${idx}-${seccion.id}`);
     const bodyEl = document.getElementById(`int-body-${idx}-${seccion.id}`);
@@ -2320,140 +2700,14 @@ Puedes preguntarme sobre cualquier sección o pedirme que amplíe, contraste o s
   }
 
   function getIntCardColor(id) {
-    const m = {'cima_raw':'#a78bfa','fda_raw':'#60a5fa','drugbank_raw':'#6366f1','pharmgkb_raw':'#ec4899','pubmed_raw':'#34d399','prac_raw':'#fbbf24','reactome_raw':'#22d3ee'};
+    const m = {'cima_raw':'#a78bfa','fda_raw':'#60a5fa','drugbank_raw':'#6366f1','pharmgkb_raw':'#ec4899','pubmed_raw':'#34d399','prac_raw':'#fbbf24','pathway_commons_raw':'#22d3ee'};
     const c = m[id] || '#6b7280';
     return `border-left-color:${c};background:color-mix(in srgb,var(--surface) 96%,${c} 4%);`;
   }
 
-  /* ── Build card HTML (reuses same logic as renderSeccion) ── */
+  /* ── Build card HTML — delegates to shared renderer ── */
   function buildCardHtml(seccion) {
-    const c = seccion.contenido;
-    const id = seccion.id;
-
-    if (id === 'cima_raw') {
-      const ftUrl = c.ft_url||'';
-      const ftLink = ftUrl ? `<a href="${ftUrl}" target="_blank" style="color:#a78bfa;font-weight:600;">Ver Ficha Técnica PDF →</a>` : '';
-      const texto  = c.texto||'';
-      const sinRes = /^la\s+ram\s+['"].+['"]\s+no\s+aparece/i.test(texto.trim()) || texto.startsWith('Sin resultados') || texto.startsWith('Ficha técnica no disponible');
-      if (sinRes) {
-        return `${ftLink?`<div style="margin-bottom:10px;">${ftLink}</div>`:''}
-          <div style="padding:12px 14px;background:color-mix(in srgb,var(--surface2) 90%,#f87171 10%);border-radius:8px;border-left:3px solid #f87171;">
-            <b style="font-size:0.78rem;color:#f87171;text-transform:uppercase;">Sin coincidencias RAM en CIMA</b><br/>
-            <span style="font-size:0.85rem;">${texto}</span>
-          </div>`;
-      }
-      const CIMA_N = {'4.3':'4.3 · Contraindicaciones','4.4':'4.4 · Advertencias','4.5':'4.5 · Interacciones','4.8':'4.8 · Reacciones adversas','4.9':'4.9 · Sobredosis','5.1':'5.1 · Farmacodinámicas','5.2':'5.2 · Farmacocinéticas'};
-      const bloques = texto.split('\n\n---\n\n').filter(b=>b.trim());
-      let h = ftLink ? `<div style="margin-bottom:8px;">${ftLink}</div>` : '';
-      h += '<div style="max-height:280px;overflow:auto;">';
-      for (const b of bloques) {
-        const nm = b.match(/^(\d+)\.(\d+)/); const k = nm?`${nm[1]}.${nm[2]}`:null;
-        h += `<div style="margin-bottom:8px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #a78bfa;">
-          <b style="font-size:0.78rem;color:#a78bfa;text-transform:uppercase;display:block;margin-bottom:4px;">${k?(CIMA_N[k]||k):'Información'}</b>
-          <div style="font-size:0.82rem;line-height:1.6;white-space:pre-wrap;">${b.trim()}</div>
-        </div>`;
-      }
-      return h + '</div>';
-    }
-
-    if (id === 'fda_raw') {
-      const r = c.fda_refs||{};
-      if (r.pt) {
-        const url = `https://api.fda.gov/drug/event.json?search=patient.drug.medicinalproduct:%22${encodeURIComponent(r.farmaco_en||'')}%22%20AND%20patient.reaction.reactionmeddrapt:%22${encodeURIComponent(r.pt)}%22`;
-        return `<div style="padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #60a5fa;">
-          <b style="font-size:0.78rem;color:#60a5fa;text-transform:uppercase;display:block;margin-bottom:4px;">PT · ${r.pt}</b>
-          <div style="font-size:0.82rem;"><b>${(r.total_pt||0).toLocaleString()} casos</b> <a href="${url}" target="_blank" style="color:#60a5fa;font-size:0.8rem;">enlace</a></div>
-        </div>`;
-      }
-      return `<div style="white-space:pre-wrap;font-size:0.8rem;">${c.texto||'No disponible'}</div>`;
-    }
-
-    if (id === 'drugbank_raw') {
-      const texto = c.texto||'';
-      const bloques = texto.split('\n\n').filter(b=>b.trim());
-      let dbH = '';
-      for (let i=0;i<bloques.length;i++) {
-        const b = bloques[i].trim();
-        const lineas = b.split('\n');
-        if (i===0) {
-          const titulo = lineas[0].replace(/=/g,'').trim();
-          const meta   = lineas.slice(1).join('\n').trim();
-          dbH += `<div style="margin-bottom:10px;padding:6px 12px;background:color-mix(in srgb,var(--surface2) 90%,#6366f1 10%);border-radius:6px;border-left:3px solid #6366f1;">
-            <b style="font-size:0.82rem;color:#6366f1;">${titulo}</b>
-            ${meta?`<div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;white-space:pre-wrap;">${meta}</div>`:''}
-          </div>`;
-        } else {
-          const hdr = lineas[0].trim().replace(/:$/,'');
-          const cnt = lineas.slice(1).join('\n').trim();
-          dbH += `<div style="margin-bottom:6px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #6366f1;">
-            <b style="font-size:0.78rem;color:#6366f1;text-transform:uppercase;display:block;margin-bottom:4px;">${hdr}</b>
-            ${cnt?`<div style="font-size:0.82rem;line-height:1.5;white-space:pre-wrap;">${cnt}</div>`:''}
-          </div>`;
-        }
-      }
-      return `<div style="max-height:280px;overflow:auto;">${dbH||`<div style="white-space:pre-wrap;font-size:0.8rem;">${texto}</div>`}</div>`;
-    }
-
-    if (id === 'pubmed_raw') {
-      const secs = c.pubmed_secciones;
-      if (!secs||!secs.length) return `<span style="color:var(--text-muted);font-size:0.82rem;">Sin resultados en PubMed</span>`;
-      let h = '';
-      for (const sec of secs) {
-        const arts = sec.articulos||[];
-        h += `<div style="margin-bottom:10px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid ${arts.length?'#34d399':'var(--border)'};">
-          <b style="font-size:0.78rem;color:${arts.length?'#34d399':'var(--text-muted)'};text-transform:uppercase;">${sec.etiqueta}</b>
-          <span style="font-size:0.73rem;color:var(--text-muted);margin-left:8px;">${sec.n_encontrados} encontrados</span>`;
-        for (const art of arts) {
-          const uid = `abs_i_${art.pmid}_${Math.random().toString(36).slice(2,6)}`;
-          h += `<div style="margin-top:6px;">
-            <div onclick="togglePubAbstract('${uid}',this)" style="cursor:pointer;display:flex;align-items:flex-start;gap:6px;padding:5px 8px;border-radius:4px;background:color-mix(in srgb,var(--surface) 80%,var(--surface2) 20%);">
-              <span class="pm-arrow" style="color:#34d399;font-size:0.75rem;flex-shrink:0;margin-top:2px;">▶</span>
-              <div style="flex:1;"><span style="font-size:0.82rem;">${art.titulo||'(sin título)'}</span>
-                <a href="https://pubmed.ncbi.nlm.nih.gov/${art.pmid}/" target="_blank" onclick="event.stopPropagation()" style="margin-left:8px;font-size:0.72rem;color:#34d399;">PMID ${art.pmid}</a>
-              </div>
-            </div>
-            <div id="${uid}" style="display:none;padding:8px 10px 4px 24px;font-size:0.78rem;line-height:1.55;color:var(--text-muted);white-space:pre-wrap;">${(art.abstract||'No disponible.').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
-          </div>`;
-        }
-        h += '</div>';
-      }
-      return h;
-    }
-
-    if (id === 'prac_raw') {
-      const texto = c.texto||'';
-      const sinR = !texto.trim()||texto.startsWith('No se encontraron')||/no aparece en las actas PRAC/i.test(texto);
-      if (sinR) return `<div style="padding:12px 14px;background:color-mix(in srgb,var(--surface2) 90%,#f87171 10%);border-radius:8px;border-left:3px solid #f87171;">
-        <b style="font-size:0.78rem;color:#f87171;">Sin coincidencias</b><br/>
-        <span style="font-size:0.85rem;">${texto}</span>
-      </div>`;
-      return `<div style="white-space:pre-wrap;font-size:0.8rem;line-height:1.5;">${texto}</div>`;
-    }
-
-    if (id === 'reactome_raw') {
-      const pathways = c.pathways||[];
-      return pathways.length
-        ? `<div style="font-size:0.82rem;line-height:1.8;">${pathways.map(p=>`<div><a href="${p.url}" target="_blank" style="color:#22d3ee;font-weight:600;">[${p.stId}]</a> ${p.name}</div>`).join('')}</div>`
-        : `<span style="color:var(--text-muted);font-size:0.82rem;">${c.texto||'Sin pathways'}</span>`;
-    }
-
-    if (id === 'pharmgkb_raw') {
-      const gd = c.genes_data||{};
-      const grp = (genes,titulo,col) => {
-        if (!genes||!genes.length) return '';
-        return `<div style="margin-bottom:10px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid ${col};">
-          <b style="font-size:0.75rem;color:${col};text-transform:uppercase;">${titulo}</b>
-          <div style="margin-top:4px;">${genes.map(g=>`<div style="font-size:0.78rem;color:var(--text-muted);">· ${g.gen||''} [${g.nivel_evidencia||''}]</div>`).join('')}</div>
-        </div>`;
-      };
-      const h = grp(gd.evidencia_fuerte_1A_1B,'Evidencia fuerte (1A/1B)','#4ade80')
-              + grp(gd.evidencia_secundaria_2A_2B,'Evidencia secundaria (2A/2B)','#f59e0b');
-      return h || `<span style="color:var(--text-muted);font-size:0.82rem;">Sin datos farmacogenéticos</span>`;
-    }
-
-    // Default
-    const txt = c.texto||'';
-    return `<div style="white-space:pre-wrap;font-size:0.82rem;line-height:1.5;max-height:280px;overflow:auto;">${txt||'(sin contenido)'}</div>`;
+    return buildRawSectionHtml(seccion.id, seccion.contenido);
   }
 
   /* ── Build interaction-specific card HTML ── */
@@ -2461,19 +2715,45 @@ Puedes preguntarme sobre cualquier sección o pedirme que amplíe, contraste o s
     const c       = seccion.contenido;
     const subtipo = seccion.subtipo;
 
-    if (subtipo === 'cima45') {
-      const texto = c.texto||'';
-      const ftUrl = c.ft_url||'';
-      const ftLink = ftUrl ? `<a href="${ftUrl}" target="_blank" style="color:#a78bfa;font-weight:600;">Ver Ficha Técnica PDF →</a>` : '';
-      const noData = texto.startsWith('Sección 4.5 no encontrada') || texto.startsWith('Error') || texto.startsWith('Sin resultados');
-      if (noData) {
-        return `${ftLink?`<div style="margin-bottom:8px;">${ftLink}</div>`:''}
-          <div style="padding:10px 14px;background:color-mix(in srgb,var(--surface2) 90%,#f59e0b 10%);border-radius:8px;border-left:3px solid #f59e0b;">
-            <span style="font-size:0.85rem;">${texto}</span>
+    if (subtipo === 'cima_int') {
+      const farmacos  = c.farmacos || [];
+      const menciones = c.menciones_cruzadas || [];
+      let h = '';
+
+      // ── Bloque superior: menciones cruzadas ──
+      if (menciones.length > 0) {
+        h += `<div style="margin-bottom:14px;padding:10px 14px;background:color-mix(in srgb,var(--surface2) 90%,#a78bfa 10%);border-radius:8px;border-left:4px solid #a78bfa;">
+          <b style="font-size:0.78rem;color:#a78bfa;text-transform:uppercase;display:block;margin-bottom:6px;">⚠ Menciones cruzadas en sección 4.5</b>`;
+        for (const m of menciones) {
+          h += `<div style="font-size:0.82rem;margin-top:6px;padding-top:6px;border-top:1px solid var(--border);">
+            <b>${m.farmaco_origen}</b> menciona a <b>${m.farmaco_mencionado}</b><br/>
+            <span style="color:var(--text-muted);font-style:italic;">"${m.fragmento}"</span>
           </div>`;
+        }
+        h += '</div>';
+      } else {
+        h += `<div style="margin-bottom:12px;padding:8px 14px;background:var(--surface2);border-radius:8px;border-left:3px solid var(--success);">
+          <b style="font-size:0.78rem;color:var(--success);">Sin menciones cruzadas directas encontradas en CIMA 4.5 entre los fármacos analizados</b>
+        </div>`;
       }
-      return `${ftLink?`<div style="margin-bottom:8px;">${ftLink}</div>`:''}
-        <div style="max-height:280px;overflow:auto;white-space:pre-wrap;font-size:0.82rem;line-height:1.6;padding:10px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #a78bfa;">${texto}</div>`;
+
+      // ── Subsecciones por fármaco ──
+      for (const f of farmacos) {
+        const ftLink = f.ft_url ? `<a href="${f.ft_url}" target="_blank" style="color:#a78bfa;font-weight:600;font-size:0.78rem;">Ver FT PDF →</a>` : '';
+        const noData = !f.texto || f.texto.startsWith('Sección 4.5 no encontrada') || f.texto.startsWith('Error') || f.texto.startsWith('Sin resultados') || f.texto.startsWith('Timeout') || f.texto.startsWith('Ficha técnica no disponible');
+        h += `<div style="margin-bottom:10px;padding:8px 12px;background:var(--surface2);border-radius:6px;border-left:2px solid #a78bfa;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <b style="font-size:0.78rem;color:#a78bfa;text-transform:uppercase;">${f.name_es}</b>
+            ${ftLink}
+          </div>`;
+        if (noData) {
+          h += `<div style="font-size:0.82rem;color:var(--text-muted);font-style:italic;">${f.texto || 'Sin datos disponibles'}</div>`;
+        } else {
+          h += `<div style="max-height:200px;overflow:auto;white-space:pre-wrap;font-size:0.8rem;line-height:1.6;">${f.texto}</div>`;
+        }
+        h += '</div>';
+      }
+      return h;
     }
 
     if (subtipo === 'drugbank_int') {
@@ -2530,7 +2810,7 @@ Puedes preguntarme sobre cualquier sección o pedirme que amplíe, contraste o s
             <b style="font-size:0.78rem;color:${arts.length?'#34d399':'var(--text-muted)'};text-transform:uppercase;">${label}</b>
             <span style="font-size:0.73rem;color:var(--text-muted);">${combo.n_encontrados} artículos en PubMed</span>
           </div>
-          <div style="font-size:0.7rem;color:var(--text-muted);font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:${arts.length?'8':'0'}px;" title="${combo.query.replace(/"/g,'&quot;')}">Query: ${combo.query.replace(/</g,'&lt;')}</div>`;
+        `;
         for (const art of arts) {
           const uid = `abs_pi_${art.pmid}_${Math.random().toString(36).slice(2,6)}`;
           h += `<div style="margin-bottom:6px;">
@@ -2550,6 +2830,66 @@ Puedes preguntarme sobre cualquier sección o pedirme que amplíe, contraste o s
 
     // Default
     return `<pre style="font-size:0.75rem;white-space:pre-wrap;max-height:280px;overflow:auto;">${JSON.stringify(c,null,2).replace(/</g,'&lt;')}</pre>`;
+  }
+
+  /* ── Render interaction report ── */
+  function renderInformeInt(c) {
+    const card = document.getElementById('int-card-informe');
+    if (!card) return;
+    card.classList.remove('loading');
+    card.classList.add(c.error ? 'error' : 'done');
+    document.getElementById('int-spin-informe')?.remove();
+
+    const hdr = card.querySelector('.card-header');
+    if (hdr && !hdr.querySelector('.card-check')) {
+      const chk = document.createElement('span');
+      chk.className   = 'card-check';
+      chk.textContent = c.error ? '✗' : '✓';
+      hdr.appendChild(chk);
+    }
+
+    if (c.error) {
+      card.querySelector('.card-body').innerHTML = `<span style="color:var(--danger);">${c.error}</span>`;
+      return;
+    }
+
+    function _badge(txt, color) {
+      return `<div style="display:inline-block;padding:3px 10px;border-radius:20px;background:color-mix(in srgb,${color} 15%,transparent);color:${color};font-weight:700;font-size:0.8rem;margin-bottom:8px;">${txt}</div>`;
+    }
+    function _sub(titulo, html) {
+      return `<div style="margin-bottom:14px;padding:10px 14px;background:var(--surface2);border-radius:8px;border-left:3px solid var(--accent-dim);">
+        <b style="font-size:0.78rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">${titulo}</b>
+        ${html}
+      </div>`;
+    }
+
+    const detectada = c.interaccion_detectada;
+    const detColor  = detectada ? 'var(--danger)' : 'var(--success)';
+    const detLabel  = detectada ? 'Interacción detectada' : 'Sin interacción documentada';
+
+    const gravColor = c.gravedad === 'Contraindicada' ? 'var(--danger)'
+                    : c.gravedad === 'Mayor'          ? '#f97316'
+                    : c.gravedad === 'Moderada'       ? 'var(--warn)'
+                    : c.gravedad === 'Menor'          ? 'var(--success)'
+                    : 'var(--text-muted)';
+
+    const html =
+      _sub('Resultado',
+        `${_badge(detLabel, detColor)}
+         ${c.tipo_interaccion ? `<div style="font-size:0.83rem;margin-top:4px;"><b>Tipo:</b> ${c.tipo_interaccion}</div>` : ''}
+         ${c.gravedad        ? _badge(c.gravedad, gravColor) : ''}`) +
+      _sub('Mecanismo',
+        `<div style="font-size:0.83rem;">${c.mecanismo || 'No documentado'}</div>`) +
+      _sub('Evidencia CIMA (sección 4.5)',
+        `<div style="font-size:0.83rem;">${c.evidencia_cima || 'Sin datos'}</div>`) +
+      _sub('Evidencia DrugBank',
+        `<div style="font-size:0.83rem;">${c.evidencia_drugbank || 'Sin datos'}</div>`) +
+      _sub('Evidencia PubMed',
+        `<div style="font-size:0.83rem;">${c.evidencia_pubmed || 'Sin datos'}</div>`) +
+      _sub('Conclusión',
+        `<div style="font-size:0.85rem;font-weight:600;">${c.conclusion || ''}</div>`);
+
+    card.querySelector('.card-body').innerHTML = html;
   }
 
   /* ── Initialize interaction form on load ── */

@@ -136,25 +136,49 @@ def _strip_accents(text: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", text or "") if unicodedata.category(c) != "Mn")
 
 
+def _term_pattern(term: str) -> re.Pattern:
+    """Compila un patrón con word boundaries reales para `term`."""
+    # re.escape + espacios flexibles
+    escaped = re.escape(term.strip())
+    # en Python 3.7+ re.escape no escapa espacios, pero por si acaso:
+    escaped = escaped.replace(r"\ ", r"\s+").replace(" ", r"\s+")
+    return re.compile(r"(?<!\w)" + escaped + r"(?!\w)", re.IGNORECASE)
+
+
 def _contains_any_term(text: str, terms: list[str]) -> bool:
     if not text:
         return False
+    # Fallback accent-insensitive con word boundaries
     text_plain = _strip_accents(text).lower()
     for raw_term in terms or []:
         term = (raw_term or "").strip()
         if not term:
             continue
-        # Match flexible spacing and boundaries first.
-        pattern = re.compile(
-            r"(?<!\\w)" + re.escape(term).replace(r"\ ", r"\\s+") + r"(?!\\w)",
-            re.IGNORECASE,
-        )
-        if pattern.search(text):
+        # Primero: regex con word boundaries sobre el texto original
+        if _term_pattern(term).search(text):
             return True
-        # Accent-insensitive fallback.
-        if _strip_accents(term).lower() in text_plain:
+        # Fallback: accent-insensitive, también con word boundaries
+        norm_term = _strip_accents(term).lower()
+        if re.search(r"(?<!\w)" + re.escape(norm_term) + r"(?!\w)", text_plain):
             return True
     return False
+
+
+def _matching_terms(text: str, terms: list[str]) -> list[str]:
+    """Devuelve los términos de `terms` que aparecen en `text` como palabras completas."""
+    if not text:
+        return []
+    text_plain = _strip_accents(text).lower()
+    found = []
+    for raw_term in terms or []:
+        term = (raw_term or "").strip()
+        if not term:
+            continue
+        if _term_pattern(term).search(text):
+            found.append(raw_term)
+        elif re.search(r"(?<!\w)" + re.escape(_strip_accents(term).lower()) + r"(?!\w)", text_plain):
+            found.append(raw_term)
+    return found
 
 
 def _extract_fragment(text: str, terms: list[str]) -> str:
@@ -562,42 +586,73 @@ Responde SOLO con este JSON (sin markdown):
                 except Exception as e:
                     print(f"    [PRAC] Error LLM subsección: {e}")
     elif tareas_llm and not usar_llm:
-        print(f"    [PRAC] {len(tareas_llm)} subsecciones sin match directo omitidas (LLM desactivado)")
+        print(f"    [PRAC] {len(tareas_llm)} subsecciones sin match directo (LLM desactivado — se incluyen igualmente)")
 
-    # Agrupar por documento y construir output
+    # Agrupar por documento — texto completo de cada subsección, no solo fragmento
     from collections import defaultdict
-    por_documento = defaultdict(list)
+    por_documento_ram  = defaultdict(list)   # {key: [(subseccion, terminos_match), ...]}
+    por_documento_farm = defaultdict(list)   # {key: [(subseccion, []), ...]}
 
-    # 1) Coincidencias directas por regex (sin LLM)
+    # 1) Coincidencias directas por regex — texto completo + términos que coinciden
     for filename, fecha, fuente, subseccion in directas:
-        fragmento = _extract_fragment(subseccion, terminos_ram) or subseccion
-        por_documento[(filename, fecha, fuente)].append(fragmento)
+        matches = _matching_terms(subseccion, terminos_ram)
+        por_documento_ram[(filename, fecha, fuente)].append((subseccion, matches))
 
-    # 2) Fallback LLM solo si regex no encontró la RAM
+    # 2) Resultado LLM — RAM confirmada → ram_doc, no confirmada → farm_doc
     for filename, fecha, fuente, subseccion, datos_llm in resultados_llm:
         if datos_llm.get("ram_presente"):
-            fragmento = datos_llm.get("fragmento") or subseccion
-            por_documento[(filename, fecha, fuente)].append(fragmento)
+            matches = _matching_terms(subseccion, terminos_ram)
+            por_documento_ram[(filename, fecha, fuente)].append((subseccion, matches))
+        else:
+            por_documento_farm[(filename, fecha, fuente)].append((subseccion, []))
+
+    # 3) Subsecciones sin LLM (usar_llm=False) → incluir como farm_doc
+    if not usar_llm:
+        for filename, fecha, fuente, subseccion in tareas_llm:
+            por_documento_farm[(filename, fecha, fuente)].append((subseccion, []))
+
+    # 4) Docs con fármaco que no tuvieron ninguna subsección parsed → farm_doc vacío
+    docs_ya_cubiertos = set(por_documento_ram.keys()) | set(por_documento_farm.keys())
+    for entrada in coincidencias:
+        key = (entrada.get("filename", ""), entrada.get("date", ""), entrada.get("source", ""))
+        if key not in docs_ya_cubiertos:
+            por_documento_farm[key]  # crea entrada vacía
+
+    def _build_ref(filename, fecha, fuente, entradas, ram_encontrada):
+        fragmentos_struct = [
+            {"texto": sub, "terminos_match": terms}
+            for sub, terms in entradas
+        ]
+        bloque_texto = f"── {fuente.upper()} | {fecha} | {filename}\n\n" + \
+                       "\n\n".join(s for s, _ in entradas)
+        return bloque_texto, {
+            "filename": filename, "date": fecha, "source": fuente,
+            "ram_encontrada": ram_encontrada,
+            "fragmentos": fragmentos_struct,
+        }
 
     bloques = []
     refs = []
-    for (filename, fecha, fuente), fragmentos in por_documento.items():
-        bloque = f"── {fuente.upper()} | {fecha} | {filename}\n\n" + "\n\n".join(fragmentos)
+    for (filename, fecha, fuente), entradas in por_documento_ram.items():
+        bloque, ref = _build_ref(filename, fecha, fuente, entradas, True)
         bloques.append(bloque)
-        refs.append({"filename": filename, "date": fecha, "source": fuente, "ram_encontrada": True})
+        refs.append(ref)
 
-    # Documentos donde el fármaco aparece pero el LLM no encontró RAM
-    docs_con_farm = {(e.get("filename"), e.get("date", ""), e.get("source", "")) for e in coincidencias}
-    docs_con_ram  = {(r["filename"], r["date"], r["source"]) for r in refs}
-    for filename, fecha, fuente in docs_con_farm - docs_con_ram:
-        refs.append({"filename": filename, "date": fecha, "source": fuente, "ram_encontrada": False})
+    for (filename, fecha, fuente), entradas in por_documento_farm.items():
+        if (filename, fecha, fuente) not in por_documento_ram:
+            bloque, ref = _build_ref(filename, fecha, fuente, entradas, False)
+            bloques.append(bloque)
+            refs.append(ref)
+        else:
+            # Ya está en ram — solo añadimos el ref para farm si no existe
+            pass
 
     separador = "\n\n" + "─" * 60 + "\n\n"
     n_con_ram = sum(1 for r in refs if r["ram_encontrada"])
     texto_final = separador.join(bloques) if bloques else ""
     print(
         f"    [PRAC] OK — {len(coincidencias)} docs con '{inn}', "
-        f"{len(directas)} subsecciones directas por regex, {n_con_ram} docs con RAM confirmada total"
+        f"{n_con_ram} con RAM confirmada, {len(refs)-n_con_ram} solo fármaco"
     )
     return texto_final, refs
 
@@ -648,51 +703,68 @@ def buscar_drugbank(farmaco: str, farmaco_ya_inn: bool = False) -> tuple:
 # 7. Reactome
 # ─────────────────────────────────────────────
 
-def buscar_reactome(farmaco: str, farmaco_ya_inn: bool = False) -> tuple:
+def buscar_pathway_commons(farmaco: str, farmaco_ya_inn: bool = False) -> tuple:
     """
-    Busca pathways humanos en Reactome por nombre de fármaco.
-    Filtra exclusivamente a Homo sapiens.
+    Busca interacciones gen-farmaco y pathways en Pathway Commons (API v14).
+    Integra CTD, PathBank, Reactome, KEGG, BioCarta y otras fuentes en BioPAX.
     Devuelve (texto, refs).
     """
     inicio = time.time()
     inn, _ = _resolver_farmaco_inn(farmaco, farmaco_ya_inn)
     inn = inn or farmaco
-    print(f"\n  [Reactome] Buscando pathways para '{inn}'...")
+    print(f"\n  [PathwayCommons] Buscando para '{inn}'...")
+
+    BASE_URL = "https://www.pathwaycommons.org/pc2"
+    HEADERS  = {"Accept": "application/json"}
 
     try:
-        resp = requests.get(
-            "https://reactome.org/ContentService/search/query",
-            params={"query": inn, "types": "Pathway", "cluster": "true", "rows": 25},
-            timeout=6,
+        # 1. Interacciones gen-farmaco (Control entities de CTD)
+        resp_ctrl = requests.get(
+            f"{BASE_URL}/search",
+            params={"q": inn, "organism": "9606", "page": 0},
+            headers=HEADERS,
+            timeout=10,
         )
-        resp.raise_for_status()
+        resp_ctrl.raise_for_status()
 
-        pathways = []
-        for group in resp.json().get("results", []):
-            for entry in group.get("entries", []):
-                species = entry.get("species", [])
-                if "Homo sapiens" not in species:
-                    continue
-                pathways.append({
-                    "stId":    entry.get("stId", ""),
-                    "name":    entry.get("name", ""),
-                    "url":     f"https://reactome.org/PathwayBrowser/#/{entry.get('stId','')}",
-                })
+        hits = resp_ctrl.json().get("searchHit", [])
+        controles = [h for h in hits if h.get("biopaxClass") == "Control"][:10]
+
+        # 2. Pathways relacionados
+        resp_pw = requests.get(
+            f"{BASE_URL}/search",
+            params={"q": inn, "biopaxClass": "Pathway", "organism": "9606", "page": 0},
+            headers=HEADERS,
+            timeout=10,
+        )
+        pathways = resp_pw.json().get("searchHit", [])[:8] if resp_pw.ok else []
 
         duracion = time.time() - inicio
-        print(f"      ✓ {len(pathways)} pathways humanos | {duracion:.2f}s")
+        print(f"      ✓ {len(controles)} interacciones gen-farmaco | {len(pathways)} pathways | {duracion:.2f}s")
 
-        if not pathways:
-            return f"No se encontraron pathways en Reactome para '{inn}'.", []
+        if not controles and not pathways:
+            return f"No se encontraron datos en Pathway Commons para '{inn}'.", []
 
-        lineas = [f"Pathways Reactome (Homo sapiens) para {inn}:"]
-        for p in pathways:
-            lineas.append(f"  [{p['stId']}] {p['name']}")
-        return "\n".join(lineas), pathways
+        lineas = [f"Pathway Commons — Datos moleculares para {inn}:"]
+        if controles:
+            lineas.append("\nInteracciones gen-farmaco (CTD):")
+            for c in controles:
+                lineas.append(f"  {c.get('name', '')}")
+        if pathways:
+            lineas.append("\nPathways relacionados:")
+            for p in pathways:
+                fuentes = ", ".join(p.get("dataSource", []))
+                lineas.append(f"  {p.get('name', '')} [{fuentes}]")
+
+        refs = (
+            [{"tipo": "interaccion", "nombre": c.get("name", ""), "uri": c.get("uri", "")} for c in controles]
+            + [{"tipo": "pathway", "nombre": p.get("name", ""), "uri": p.get("uri", "")} for p in pathways]
+        )
+        return "\n".join(lineas), refs
 
     except Exception as e:
         duracion = time.time() - inicio
-        msg = "Reactome no accesible (timeout de red)" if "timeout" in str(e).lower() or "timed out" in str(e).lower() else f"Error Reactome: {str(e)[:80]}"
+        msg = "Pathway Commons no accesible (timeout)" if "timeout" in str(e).lower() or "timed out" in str(e).lower() else f"Error Pathway Commons: {str(e)[:80]}"
         print(f"      ❌ {msg} | {duracion:.2f}s")
         return msg, []
 
@@ -974,15 +1046,12 @@ def buscar_cima(
             terminos_ram = [reaccion]
             ram_directa = _contains_any_term(texto_ft, terminos_ram)
 
+            ram_encontrada = False
             if ram_directa:
-                fragmento = _extract_fragment(texto_ft, terminos_ram)
+                ram_encontrada = True
                 print(f"    [CIMA] RAM '{reaccion}' encontrada por regex directa")
-                if fragmento:
-                    print(f"    [CIMA] Fragmento detectado: {fragmento[:240]}")
             elif not usar_llm:
-                # Sin LLM: si no hay match regex se informa pero se devuelve el texto extraído
                 print(f"    [CIMA] Sin match directo para '{reaccion}' (LLM desactivado)")
-                texto_ft = f"La RAM '{reaccion}' no se encontró por regex en la ficha técnica de CIMA."
             else:
                 print(f"    [CIMA] Sin match directo por regex para '{reaccion}'. Fallback LLM...")
                 prompt_cima = f"""Ficha técnica (CIMA/AEMPS):
@@ -1006,21 +1075,29 @@ Responde SOLO con este JSON (sin markdown):
                         datos_cima = {"ram_presente": False, "fragmento": None}
 
                 if datos_cima.get("ram_presente"):
-                    fragmento = datos_cima.get("fragmento") or ""
+                    ram_encontrada = True
                     print(f"    [CIMA] RAM '{reaccion}' confirmada por LLM fallback")
-                    if fragmento:
-                        print(f"    [CIMA] Fragmento LLM: {fragmento[:240]}")
                 else:
-                    texto_ft = f"La RAM '{reaccion}' no aparece en la ficha técnica de CIMA."
                     print(f"    [CIMA] RAM '{reaccion}' no confirmada")
 
+            # Siempre devolvemos las secciones del PDF; ram_encontrada va en refs
+            print("="*60 + "\n")
+            return texto_ft, [{"ft_url": ft_url, "nombre_oficial": nombre_oficial,
+                                "ram_encontrada": ram_encontrada, "ram": reaccion}]
+        else:
+            ram_encontrada = True  # sin filtro de RAM, mostramos todo
+
         print("="*60 + "\n")
-        return texto_ft, [{"ft_url": ft_url, "nombre_oficial": nombre_oficial}]
+        return texto_ft, [{"ft_url": ft_url, "nombre_oficial": nombre_oficial,
+                            "ram_encontrada": ram_encontrada}]
 
     except Exception as e:
         print(f"    ❌ Error CIMA: {e}")
         print("="*60 + "\n")
         return f"Error al consultar CIMA: {str(e)[:120]}", []
+# ─────────────────────────────────────────────
+# INTERACCIONES
+# ─────────────────────────────────────────────
 
 
 # ─────────────────────────────────────────────
@@ -1142,13 +1219,26 @@ def buscar_pubmed_interacciones(
     terminos_ram = [ram_en] + [l for l in llts if l.lower() != ram_en.lower()]
     ram_query = " OR ".join(f'"{t}"' for t in terminos_ram) if terminos_ram else ""
 
+    import itertools
     n = len(farmacos_inn)
-    # Build combinations: full AND + each N-1 subset (one drug excluded each time)
-    combos = [farmacos_inn[:]]  # full combination
+    # full combo + N-1 subsets + all pairs (size 2)
+    combos_set: list[tuple] = []
+    seen: set = set()
+
+    def _add(combo):
+        key = tuple(sorted(combo))
+        if key not in seen:
+            seen.add(key)
+            combos_set.append(list(combo))
+
+    _add(farmacos_inn)                          # todos juntos
     if n > 2:
-        for i in range(n):
-            combo = [f for j, f in enumerate(farmacos_inn) if j != i]
-            combos.append(combo)
+        for i in range(n):                      # N-1 subsets
+            _add([f for j, f in enumerate(farmacos_inn) if j != i])
+    if n > 2:
+        for pair in itertools.combinations(farmacos_inn, 2):  # parejas
+            _add(list(pair))
+    combos = combos_set
 
     resultados_combinaciones = []
     all_pmids: set = set()
@@ -1216,7 +1306,7 @@ def buscar_evidencia(datos: dict) -> dict:
             executor.submit(buscar_prac,     farmaco, reaccion, cod_dedra):        "PRAC/EMA",
             executor.submit(buscar_drugbank, farmaco):                              "DrugBank",
             executor.submit(buscar_pharmgkb, farmaco):                              "PharmGKB",
-            executor.submit(buscar_reactome, farmaco):                              "Reactome",
+            executor.submit(buscar_pathway_commons, farmaco):                      "PathwayCommons",
         }
 
         completadas = 0
